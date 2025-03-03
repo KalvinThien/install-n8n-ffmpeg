@@ -293,15 +293,15 @@ fi
 
 # Tạo script kiểm tra cập nhật tự động
 echo "Tạo script cập nhật tự động..."
-cat << 'EOF' > $N8N_DIR/update-n8n.sh
+cat << EOF > $N8N_DIR/update-n8n.sh
 #!/bin/bash
 
 # Đường dẫn đến thư mục n8n
-N8N_DIR=${N8N_DIR:-/home/n8n}
+N8N_DIR="$N8N_DIR"
 
 # Hàm ghi log
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> $N8N_DIR/update.log
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$N8N_DIR/update.log
 }
 
 log "Bắt đầu kiểm tra cập nhật..."
@@ -317,43 +317,43 @@ else
 fi
 
 # Lấy phiên bản hiện tại
-CURRENT_IMAGE_ID=$(docker images -q n8n-ffmpeg-latest)
-if [ -z "$CURRENT_IMAGE_ID" ]; then
+CURRENT_IMAGE_ID=\$(docker images -q n8n-ffmpeg-latest)
+if [ -z "\$CURRENT_IMAGE_ID" ]; then
     log "Không tìm thấy image n8n-ffmpeg-latest"
     exit 1
 fi
 
 # Kiểm tra và xóa image gốc n8nio/n8n cũ nếu cần
-OLD_BASE_IMAGE_ID=$(docker images -q n8nio/n8n)
+OLD_BASE_IMAGE_ID=\$(docker images -q n8nio/n8n)
 
 # Pull image gốc mới nhất
 log "Kéo image n8nio/n8n mới nhất"
 docker pull n8nio/n8n
 
 # Lấy image ID mới
-NEW_BASE_IMAGE_ID=$(docker images -q n8nio/n8n)
+NEW_BASE_IMAGE_ID=\$(docker images -q n8nio/n8n)
 
 # Kiểm tra xem image gốc đã thay đổi chưa
-if [ "$NEW_BASE_IMAGE_ID" != "$OLD_BASE_IMAGE_ID" ]; then
-    log "Phát hiện image mới (${NEW_BASE_IMAGE_ID}), tiến hành cập nhật..."
+if [ "\$NEW_BASE_IMAGE_ID" != "\$OLD_BASE_IMAGE_ID" ]; then
+    log "Phát hiện image mới (\${NEW_BASE_IMAGE_ID}), tiến hành cập nhật..."
     
     # Sao lưu dữ liệu n8n
-    BACKUP_DATE=$(date '+%Y%m%d_%H%M%S')
-    BACKUP_FILE="$N8N_DIR/backup_${BACKUP_DATE}.zip"
-    log "Tạo bản sao lưu tại $BACKUP_FILE"
-    zip -r $BACKUP_FILE $N8N_DIR -x $N8N_DIR/update-n8n.sh -x $N8N_DIR/backup_* -x $N8N_DIR/files/temp/* -x $N8N_DIR/Dockerfile -x $N8N_DIR/docker-compose.yml
+    BACKUP_DATE=\$(date '+%Y%m%d_%H%M%S')
+    BACKUP_FILE="\$N8N_DIR/backup_\${BACKUP_DATE}.zip"
+    log "Tạo bản sao lưu tại \$BACKUP_FILE"
+    zip -r \$BACKUP_FILE \$N8N_DIR -x \$N8N_DIR/update-n8n.sh -x \$N8N_DIR/backup_* -x \$N8N_DIR/files/temp/* -x \$N8N_DIR/Dockerfile -x \$N8N_DIR/docker-compose.yml
     
     # Build lại image n8n-ffmpeg
-    cd $N8N_DIR
+    cd \$N8N_DIR
     log "Đang build lại image n8n-ffmpeg-latest..."
-    $DOCKER_COMPOSE build
+    \$DOCKER_COMPOSE build
     
     # Khởi động lại container
     log "Khởi động lại container..."
-    $DOCKER_COMPOSE down
-    $DOCKER_COMPOSE up -d
+    \$DOCKER_COMPOSE down
+    \$DOCKER_COMPOSE up -d
     
-    log "Cập nhật hoàn tất, phiên bản mới: ${NEW_BASE_IMAGE_ID}"
+    log "Cập nhật hoàn tất, phiên bản mới: \${NEW_BASE_IMAGE_ID}"
 else
     log "Không có cập nhật mới cho n8n"
 fi
