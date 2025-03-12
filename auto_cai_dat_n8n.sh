@@ -114,7 +114,7 @@ install_docker() {
 # Cài đặt các gói cần thiết
 echo "Đang cài đặt các công cụ cần thiết..."
 apt-get update
-apt-get install -y dnsutils curl cron python3-pip
+apt-get install -y dnsutils curl cron python3-pip jq tar gzip
 
 # Cài đặt yt-dlp trên host system
 echo "Cài đặt yt-dlp..."
@@ -150,6 +150,7 @@ mkdir -p $N8N_DIR
 mkdir -p $N8N_DIR/files
 mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
+mkdir -p $N8N_DIR/files/backup_full
 
 # Tạo Dockerfile
 echo "Tạo Dockerfile để cài đặt n8n với FFmpeg và yt-dlp..."
@@ -160,7 +161,7 @@ USER root
 
 # Cài đặt FFmpeg, wget, zip và các gói phụ thuộc khác
 RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar
 
 # Cài đặt yt-dlp
 RUN pip3 install -U yt-dlp
@@ -175,8 +176,9 @@ RUN ffmpeg -version && \
     zip --version | head -n 2 && \
     yt-dlp --version
 
-# Tạo thư mục youtube_content_anylystic và set đúng quyền
+# Tạo thư mục youtube_content_anylystic và backup_full và set đúng quyền
 RUN mkdir -p /files/youtube_content_anylystic && \
+    mkdir -p /files/backup_full && \
     chown -R node:node /files
 
 # Trở lại user node
@@ -208,7 +210,7 @@ services:
       - N8N_BINARY_DATA_STORAGE=/files
       - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
       - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os,crypto,stream
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
       - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
     volumes:
       - ${N8N_DIR}:/home/node/.n8n
@@ -240,6 +242,79 @@ ${DOMAIN} {
     reverse_proxy n8n:5678
 }
 EOF
+
+# Tạo script sao lưu workflow và credentials
+echo "Tạo script sao lưu workflow và credentials..."
+cat << EOF > $N8N_DIR/backup-workflows.sh
+#!/bin/bash
+
+# Thiết lập biến
+BACKUP_DIR="/files/backup_full"
+DATE=\$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="\$BACKUP_DIR/n8n_backup_\$DATE.tar"
+TEMP_DIR="/tmp/n8n_backup_\$DATE"
+N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
+
+# Hàm ghi log
+log() {
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$BACKUP_DIR/backup.log
+}
+
+log "Bắt đầu sao lưu workflows và credentials..."
+
+# Tạo thư mục tạm thời
+mkdir -p \$TEMP_DIR
+mkdir -p \$TEMP_DIR/workflows
+mkdir -p \$TEMP_DIR/credentials
+mkdir -p \$BACKUP_DIR
+
+# Kiểm tra container n8n có đang chạy không
+if [ -z "\$N8N_CONTAINER" ]; then
+    log "Lỗi: Không tìm thấy container n8n đang chạy"
+    rm -rf \$TEMP_DIR
+    exit 1
+fi
+
+# Xuất danh sách workflow IDs
+log "Xuất danh sách workflow IDs..."
+docker exec \$N8N_CONTAINER n8n export:workflow --all --quiet
+
+# Xuất từng workflow ra file JSON riêng
+log "Xuất workflows ra file JSON..."
+WORKFLOWS=\$(docker exec \$N8N_CONTAINER n8n list:workflows --json)
+if [ -z "\$WORKFLOWS" ]; then
+    log "Cảnh báo: Không tìm thấy workflow nào"
+else
+    echo "\$WORKFLOWS" | jq -c '.[]' | while read -r workflow; do
+        id=\$(echo "\$workflow" | jq -r '.id')
+        name=\$(echo "\$workflow" | jq -r '.name' | tr -dc '[:alnum:][:space:]' | tr '[:space:]' '_')
+        log "Đang xuất workflow: \$name (ID: \$id)"
+        docker exec \$N8N_CONTAINER n8n export:workflow --id="\$id" --output="\$TEMP_DIR/workflows/\$id-\$name.json"
+    done
+fi
+
+# Sao lưu thư mục .n8n
+log "Sao lưu thư mục .n8n chứa credentials..."
+cp -r /home/node/.n8n/database.sqlite \$TEMP_DIR/credentials/
+cp -r /home/node/.n8n/encryptionKey \$TEMP_DIR/credentials/
+
+# Tạo file tar
+log "Tạo file tar: \$BACKUP_FILE"
+tar -cf \$BACKUP_FILE -C \$(dirname \$TEMP_DIR) \$(basename \$TEMP_DIR)
+
+# Xóa thư mục tạm thời
+log "Dọn dẹp thư mục tạm thời..."
+rm -rf \$TEMP_DIR
+
+# Giữ lại tối đa 30 bản sao lưu gần nhất
+log "Giữ lại 30 bản sao lưu gần nhất..."
+ls -t \$BACKUP_DIR/n8n_backup_*.tar | tail -n +31 | xargs -r rm
+
+log "Sao lưu hoàn tất: \$BACKUP_FILE"
+EOF
+
+# Đặt quyền thực thi cho script sao lưu
+chmod +x $N8N_DIR/backup-workflows.sh
 
 # Đặt quyền cho thư mục n8n
 echo "Đặt quyền cho thư mục n8n..."
@@ -400,9 +475,10 @@ EOF
 chmod +x $N8N_DIR/update-n8n.sh
 
 # Tạo cron job để chạy mỗi 12 giờ
-echo "Tạo cron job cập nhật tự động mỗi 12 giờ..."
-CRON_JOB="0 */12 * * * $N8N_DIR/update-n8n.sh"
-(crontab -l 2>/dev/null | grep -v "update-n8n.sh"; echo "$CRON_JOB") | crontab -
+echo "Thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày..."
+UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
+BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
+(crontab -l 2>/dev/null | grep -v "update-n8n.sh\|backup-workflows.sh"; echo "$UPDATE_CRON"; echo "$BACKUP_CRON") | crontab -
 
 echo "======================================================================"
 echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, wget, zip và SSL sử dụng Caddy."
@@ -414,6 +490,12 @@ echo "  - Kiểm tra cập nhật mỗi 12 giờ"
 echo "  - Log cập nhật được lưu tại $N8N_DIR/update.log"
 echo "  - Tự động sao lưu trước khi cập nhật"
 echo "  - Tự động cập nhật yt-dlp trên cả host và container"
+echo ""
+echo "► Tính năng sao lưu workflow và credentials:"
+echo "  - Sao lưu tự động hàng ngày vào lúc 2 giờ sáng"
+echo "  - File sao lưu được lưu tại $N8N_DIR/files/backup_full với tên theo thời gian"
+echo "  - Giữ lại 30 bản sao lưu gần nhất"
+echo "  - Log sao lưu được lưu tại $N8N_DIR/files/backup_full/backup.log"
 echo ""
 echo "► Thông tin về thư mục tải video:"
 echo "  - Thư mục lưu video YouTube: $N8N_DIR/files/youtube_content_anylystic/"
