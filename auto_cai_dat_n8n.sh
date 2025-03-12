@@ -2,7 +2,7 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "     Script cài đặt N8N với FFmpeg và SSL tự động                     "
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp và SSL tự động             "
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -114,7 +114,11 @@ install_docker() {
 # Cài đặt các gói cần thiết
 echo "Đang cài đặt các công cụ cần thiết..."
 apt-get update
-apt-get install -y dnsutils curl cron
+apt-get install -y dnsutils curl cron python3-pip
+
+# Cài đặt yt-dlp trên host system
+echo "Cài đặt yt-dlp..."
+pip3 install -U yt-dlp
 
 # Đảm bảo cron service đang chạy
 systemctl enable cron
@@ -145,22 +149,35 @@ echo "Tạo cấu trúc thư mục cho n8n tại $N8N_DIR..."
 mkdir -p $N8N_DIR
 mkdir -p $N8N_DIR/files
 mkdir -p $N8N_DIR/files/temp
+mkdir -p $N8N_DIR/files/youtube_content_anylystic
 
 # Tạo Dockerfile
-echo "Tạo Dockerfile để cài đặt n8n với FFmpeg..."
+echo "Tạo Dockerfile để cài đặt n8n với FFmpeg và yt-dlp..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
 
 USER root
 
-# Cài đặt FFmpeg, wget và zip
+# Cài đặt FFmpeg, wget, zip và các gói phụ thuộc khác
 RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip
+
+# Cài đặt yt-dlp
+RUN pip3 install -U yt-dlp
+
+# Đảm bảo lệnh yt-dlp có thể thực thi
+RUN ln -sf /usr/bin/yt-dlp /usr/local/bin/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp
 
 # Kiểm tra cài đặt các công cụ
 RUN ffmpeg -version && \
     wget --version | head -n 1 && \
-    zip --version | head -n 2
+    zip --version | head -n 2 && \
+    yt-dlp --version
+
+# Tạo thư mục youtube_content_anylystic và set đúng quyền
+RUN mkdir -p /files/youtube_content_anylystic && \
+    chown -R node:node /files
 
 # Trở lại user node
 USER node
@@ -191,7 +208,7 @@ services:
       - N8N_BINARY_DATA_STORAGE=/files
       - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
       - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os,crypto,stream
       - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
     volumes:
       - ${N8N_DIR}:/home/node/.n8n
@@ -274,8 +291,8 @@ else
     fi
 fi
 
-# Kiểm tra FFmpeg trong container n8n (nếu container đã chạy)
-echo "Kiểm tra FFmpeg trong container n8n..."
+# Kiểm tra FFmpeg và yt-dlp trong container n8n
+echo "Kiểm tra FFmpeg và yt-dlp trong container n8n..."
 N8N_CONTAINER=$(docker ps -q --filter "name=n8n" 2>/dev/null)
 if [ -n "$N8N_CONTAINER" ]; then
     if docker exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
@@ -284,11 +301,17 @@ if [ -n "$N8N_CONTAINER" ]; then
         docker exec $N8N_CONTAINER ffmpeg -version | head -n 1
     else
         echo "Lưu ý: FFmpeg có thể chưa được cài đặt đúng cách trong container."
-        echo "Bạn có thể kiểm tra thủ công sau với lệnh: docker exec \$(docker ps -q --filter \"name=n8n\") ffmpeg -version"
+    fi
+
+    if docker exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
+        echo "yt-dlp đã được cài đặt thành công trong container n8n."
+        echo "Phiên bản yt-dlp:"
+        docker exec $N8N_CONTAINER yt-dlp --version
+    else
+        echo "Lưu ý: yt-dlp có thể chưa được cài đặt đúng cách trong container."
     fi
 else
-    echo "Lưu ý: Không thể kiểm tra FFmpeg ngay lúc này. Container n8n chưa sẵn sàng."
-    echo "Bạn có thể kiểm tra thủ công sau với lệnh: docker exec \$(docker ps -q --filter \"name=n8n\") ffmpeg -version"
+    echo "Lưu ý: Không thể kiểm tra công cụ ngay lúc này. Container n8n chưa sẵn sàng."
 fi
 
 # Tạo script kiểm tra cập nhật tự động
@@ -315,6 +338,10 @@ else
     log "Không tìm thấy lệnh docker-compose hoặc docker compose."
     exit 1
 fi
+
+# Cập nhật yt-dlp trên host
+log "Cập nhật yt-dlp trên host system..."
+pip3 install -U yt-dlp
 
 # Lấy phiên bản hiện tại
 CURRENT_IMAGE_ID=\$(docker images -q n8n-ffmpeg-latest)
@@ -356,6 +383,16 @@ if [ "\$NEW_BASE_IMAGE_ID" != "\$OLD_BASE_IMAGE_ID" ]; then
     log "Cập nhật hoàn tất, phiên bản mới: \${NEW_BASE_IMAGE_ID}"
 else
     log "Không có cập nhật mới cho n8n"
+    
+    # Vẫn cập nhật yt-dlp trong container
+    log "Cập nhật yt-dlp trong container n8n..."
+    N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
+    if [ -n "\$N8N_CONTAINER" ]; then
+        docker exec -u root \$N8N_CONTAINER pip3 install -U yt-dlp
+        log "yt-dlp đã được cập nhật thành công trong container"
+    else
+        log "Không tìm thấy container n8n đang chạy"
+    fi
 fi
 EOF
 
@@ -368,7 +405,7 @@ CRON_JOB="0 */12 * * * $N8N_DIR/update-n8n.sh"
 (crontab -l 2>/dev/null | grep -v "update-n8n.sh"; echo "$CRON_JOB") | crontab -
 
 echo "======================================================================"
-echo "N8n đã được cài đặt và cấu hình với FFmpeg, wget, zip và SSL sử dụng Caddy."
+echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, wget, zip và SSL sử dụng Caddy."
 echo "Truy cập https://${DOMAIN} để sử dụng."
 echo "Các file cấu hình và dữ liệu được lưu trong $N8N_DIR"
 echo ""
@@ -376,6 +413,10 @@ echo "► Tính năng tự động cập nhật đã được thiết lập:"
 echo "  - Kiểm tra cập nhật mỗi 12 giờ"
 echo "  - Log cập nhật được lưu tại $N8N_DIR/update.log"
 echo "  - Tự động sao lưu trước khi cập nhật"
+echo "  - Tự động cập nhật yt-dlp trên cả host và container"
+echo ""
+echo "► Thông tin về thư mục tải video:"
+echo "  - Thư mục lưu video YouTube: $N8N_DIR/files/youtube_content_anylystic/"
 echo ""
 echo "Lưu ý: Có thể mất vài phút để SSL được cấu hình hoàn tất."
 echo "Script được chỉnh sửa từ script gốc của Nguyễn Ngọc Thiện, https://www.youtube.com/@EtoolsAICONTENT"
