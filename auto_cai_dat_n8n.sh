@@ -152,7 +152,7 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile
+# Tạo Dockerfile - ĐÃ ĐƯỢC SỬA ĐỂ SỬ DỤNG VIRTUAL ENVIRONMENT CHO YT-DLP
 echo "Tạo Dockerfile để cài đặt n8n với FFmpeg và yt-dlp..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
@@ -163,12 +163,16 @@ USER root
 RUN apk update && \
     apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar
 
-# Cài đặt yt-dlp
-RUN pip3 install -U yt-dlp
+# Tạo và sử dụng virtual environment để cài đặt yt-dlp
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install -U yt-dlp
 
-# Đảm bảo lệnh yt-dlp có thể thực thi
-RUN ln -sf /usr/bin/yt-dlp /usr/local/bin/yt-dlp && \
+# Tạo symbolic link đến yt-dlp trong virtual environment
+RUN ln -sf /opt/venv/bin/yt-dlp /usr/local/bin/yt-dlp && \
     chmod +x /usr/local/bin/yt-dlp
+
+# Thiết lập PATH để bao gồm virtual environment
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Kiểm tra cài đặt các công cụ
 RUN ffmpeg -version && \
@@ -459,11 +463,11 @@ if [ "\$NEW_BASE_IMAGE_ID" != "\$OLD_BASE_IMAGE_ID" ]; then
 else
     log "Không có cập nhật mới cho n8n"
     
-    # Vẫn cập nhật yt-dlp trong container
+    # Cập nhật yt-dlp trong container sử dụng virtual environment
     log "Cập nhật yt-dlp trong container n8n..."
     N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
     if [ -n "\$N8N_CONTAINER" ]; then
-        docker exec -u root \$N8N_CONTAINER pip3 install -U yt-dlp
+        docker exec -u root \$N8N_CONTAINER /opt/venv/bin/pip install -U yt-dlp
         log "yt-dlp đã được cập nhật thành công trong container"
     else
         log "Không tìm thấy container n8n đang chạy"
