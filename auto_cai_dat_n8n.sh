@@ -2,7 +2,7 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "     Script cài đặt N8N với FFmpeg, yt-dlp và SSL tự động             "
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -152,8 +152,8 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile - ĐÃ ĐƯỢC SỬA ĐỂ SỬ DỤNG VIRTUAL ENVIRONMENT CHO YT-DLP
-echo "Tạo Dockerfile để cài đặt n8n với FFmpeg và yt-dlp..."
+# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
+echo "Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
 
@@ -161,7 +161,21 @@ USER root
 
 # Cài đặt FFmpeg, wget, zip và các gói phụ thuộc khác
 RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar \
+    # Puppeteer dependencies
+    chromium \
+    nss \
+    freetype \
+    freetype-dev \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont \
+    ttf-liberation \
+    font-noto \
+    font-noto-cjk \
+    font-noto-emoji \
+    dbus \
+    udev
 
 # Tạo và sử dụng virtual environment để cài đặt yt-dlp
 RUN python3 -m venv /opt/venv && \
@@ -174,11 +188,20 @@ RUN ln -sf /opt/venv/bin/yt-dlp /usr/local/bin/yt-dlp && \
 # Thiết lập PATH để bao gồm virtual environment
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Thiết lập biến môi trường cho Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+
+# Cài đặt n8n-nodes-puppeteer
+WORKDIR /usr/local/lib/node_modules/n8n
+RUN npm install n8n-nodes-puppeteer
+
 # Kiểm tra cài đặt các công cụ
 RUN ffmpeg -version && \
     wget --version | head -n 1 && \
     zip --version | head -n 2 && \
-    yt-dlp --version
+    yt-dlp --version && \
+    chromium-browser --version
 
 # Tạo thư mục youtube_content_anylystic và backup_full và set đúng quyền
 RUN mkdir -p /files/youtube_content_anylystic && \
@@ -187,6 +210,7 @@ RUN mkdir -p /files/youtube_content_anylystic && \
 
 # Trở lại user node
 USER node
+WORKDIR /home/node
 EOF
 
 # Tạo file docker-compose.yml
@@ -216,10 +240,15 @@ services:
       - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
       - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
       - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
+      # Cấu hình Puppeteer
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
     volumes:
       - ${N8N_DIR}:/home/node/.n8n
       - ${N8N_DIR}/files:/files
     user: "1000:1000"
+    cap_add:
+      - SYS_ADMIN  # Thêm quyền cho Puppeteer
 
   caddy:
     image: caddy:2
@@ -370,8 +399,8 @@ else
     fi
 fi
 
-# Kiểm tra FFmpeg và yt-dlp trong container n8n
-echo "Kiểm tra FFmpeg và yt-dlp trong container n8n..."
+# Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n
+echo "Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n..."
 N8N_CONTAINER=$(docker ps -q --filter "name=n8n" 2>/dev/null)
 if [ -n "$N8N_CONTAINER" ]; then
     if docker exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
@@ -388,6 +417,14 @@ if [ -n "$N8N_CONTAINER" ]; then
         docker exec $N8N_CONTAINER yt-dlp --version
     else
         echo "Lưu ý: yt-dlp có thể chưa được cài đặt đúng cách trong container."
+    fi
+    
+    if docker exec $N8N_CONTAINER chromium-browser --version &> /dev/null; then
+        echo "Chromium đã được cài đặt thành công trong container n8n."
+        echo "Phiên bản Chromium:"
+        docker exec $N8N_CONTAINER chromium-browser --version
+    else
+        echo "Lưu ý: Chromium có thể chưa được cài đặt đúng cách trong container."
     fi
 else
     echo "Lưu ý: Không thể kiểm tra công cụ ngay lúc này. Container n8n chưa sẵn sàng."
@@ -485,7 +522,7 @@ BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
 (crontab -l 2>/dev/null | grep -v "update-n8n.sh\|backup-workflows.sh"; echo "$UPDATE_CRON"; echo "$BACKUP_CRON") | crontab -
 
 echo "======================================================================"
-echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, wget, zip và SSL sử dụng Caddy."
+echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, Puppeteer và SSL sử dụng Caddy."
 echo "Truy cập https://${DOMAIN} để sử dụng."
 echo "Các file cấu hình và dữ liệu được lưu trong $N8N_DIR"
 echo ""
@@ -503,6 +540,11 @@ echo "  - Log sao lưu được lưu tại $N8N_DIR/files/backup_full/backup.log
 echo ""
 echo "► Thông tin về thư mục tải video:"
 echo "  - Thư mục lưu video YouTube: $N8N_DIR/files/youtube_content_anylystic/"
+echo ""
+echo "► Thông tin về Puppeteer:"
+echo "  - Chromium Browser đã được cài đặt trong container cho Puppeteer"
+echo "  - n8n-nodes-puppeteer package đã được cài đặt sẵn"
+echo "  - Để sử dụng nút Puppeteer trong n8n, tìm kiếm 'Puppeteer' trong bộ nút"
 echo ""
 echo "Lưu ý: Có thể mất vài phút để SSL được cấu hình hoàn tất."
 echo "Script được chỉnh sửa từ script gốc của Nguyễn Ngọc Thiện, https://www.youtube.com/@EtoolsAICONTENT"
