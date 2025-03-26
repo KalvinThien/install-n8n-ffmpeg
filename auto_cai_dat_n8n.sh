@@ -11,6 +11,66 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Hàm thiết lập swap tự động
+setup_swap() {
+    echo "Kiểm tra và thiết lập swap tự động..."
+    
+    # Kiểm tra nếu swap đã được bật
+    if [ "$(swapon --show | wc -l)" -gt 0 ]; then
+        SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
+        echo "Swap đã được bật với kích thước ${SWAP_SIZE}. Bỏ qua thiết lập."
+        return
+    fi
+    
+    # Lấy thông tin RAM (đơn vị MB)
+    RAM_MB=$(free -m | grep Mem | awk '{print $2}')
+    
+    # Tính toán kích thước swap dựa trên RAM
+    if [ "$RAM_MB" -le 2048 ]; then
+        # Với RAM <= 2GB, swap = 2x RAM
+        SWAP_SIZE=$((RAM_MB * 2))
+    elif [ "$RAM_MB" -gt 2048 ] && [ "$RAM_MB" -le 8192 ]; then
+        # Với 2GB < RAM <= 8GB, swap = RAM
+        SWAP_SIZE=$RAM_MB
+    else
+        # Với RAM > 8GB, swap = 4GB
+        SWAP_SIZE=4096
+    fi
+    
+    # Chuyển đổi sang GB cho dễ nhìn (làm tròn lên)
+    SWAP_GB=$(( (SWAP_SIZE + 1023) / 1024 ))
+    
+    echo "Đang thiết lập swap với kích thước ${SWAP_GB}GB (${SWAP_SIZE}MB)..."
+    
+    # Tạo swap file với đơn vị MB
+    dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE status=progress
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    
+    # Thêm vào fstab để swap được kích hoạt sau khi khởi động lại
+    if ! grep -q "/swapfile" /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+    
+    # Cấu hình swappiness và cache pressure
+    sysctl vm.swappiness=10
+    sysctl vm.vfs_cache_pressure=50
+    
+    # Lưu cấu hình vào sysctl.conf nếu chưa có
+    if ! grep -q "vm.swappiness" /etc/sysctl.conf; then
+        echo "vm.swappiness=10" >> /etc/sysctl.conf
+    fi
+    
+    if ! grep -q "vm.vfs_cache_pressure" /etc/sysctl.conf; then
+        echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
+    fi
+    
+    echo "Đã thiết lập swap với kích thước ${SWAP_GB}GB thành công."
+    echo "Swappiness đã được đặt thành 10 (mặc định: 60)"
+    echo "Vfs_cache_pressure đã được đặt thành 50 (mặc định: 100)"
+}
+
 # Hàm hiển thị trợ giúp
 show_help() {
     echo "Cách sử dụng: $0 [tùy chọn]"
@@ -66,6 +126,9 @@ check_commands() {
         apt-get install -y dnsutils
     fi
 }
+
+# Thiết lập swap
+setup_swap
 
 # Hàm cài đặt Docker
 install_docker() {
@@ -533,6 +596,15 @@ BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
 echo "======================================================================"
 echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, Puppeteer và SSL sử dụng Caddy."
 echo "Truy cập https://${DOMAIN} để sử dụng."
+
+# Hiển thị thông tin về swap
+if [ "$(swapon --show | wc -l)" -gt 0 ]; then
+    SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
+    echo "► Swap đã được thiết lập:"
+    echo "  - Kích thước: ${SWAP_SIZE}"
+    echo "  - Swappiness: $(cat /proc/sys/vm/swappiness) (Mức càng thấp càng ưu tiên dùng RAM)"
+    echo "  - Vfs_cache_pressure: $(cat /proc/sys/vm/vfs_cache_pressure) (Mức càng thấp càng giữ cache lâu hơn)"
+fi
 echo "Các file cấu hình và dữ liệu được lưu trong $N8N_DIR"
 echo ""
 echo "► Tính năng tự động cập nhật đã được thiết lập:"
