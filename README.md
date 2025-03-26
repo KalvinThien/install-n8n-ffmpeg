@@ -54,7 +54,10 @@ chmod +x n8n-install.sh
 # Chạy script
 sudo ./n8n-install.sh
 ```
-
+# Cài Tự Động
+```bash
+cd /tmp && curl -sSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh | tr -d '\r' > install_n8n.sh && chmod +x install_n8n.sh && sudo bash install_n8n.sh
+```
 ### Tùy chọn nâng cao
 
 ```bash
@@ -114,7 +117,7 @@ Các tham số swappiness và cache pressure được điều chỉnh để hi�
 ### Liên hệ
 
 - **Zalo/Phone**: 0888884749
-- **GitHub**: [your-github-username](https://github.com/your-username)
+- **GitHub**: [Github/kalvinThien](https://github.com/KalvinThien)
 
 ### Donate
 
@@ -124,7 +127,7 @@ Nếu bạn thấy dự án này hữu ích, hãy xem xét hỗ trợ để phá
 - **Chủ tài khoản**: Nguyễn Ngọc Thiện
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/your-username/n8n-installer/main/qrcode.png" alt="QR Code Donate" width="200">
+  <img src="https://github.com/KalvinThien/install-n8n-ffmpeg/blob/main/qrcode.png?raw=true" alt="QR Code Donate" width="400">
 </div>
 
 ## 📝 Changelog
