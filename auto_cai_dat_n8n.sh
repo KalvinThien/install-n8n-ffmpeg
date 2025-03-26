@@ -173,13 +173,23 @@ install_docker() {
         exit 1
     fi
 
+    # Thêm user hiện tại vào nhóm docker nếu không phải root
+    if [ "$SUDO_USER" != "" ]; then
+        echo "Thêm user $SUDO_USER vào nhóm docker để có thể chạy docker mà không cần sudo..."
+        usermod -aG docker $SUDO_USER
+        echo "Đã thêm user $SUDO_USER vào nhóm docker. Các thay đổi sẽ có hiệu lực sau khi đăng nhập lại."
+    fi
+
+    # Khởi động lại dịch vụ Docker
+    systemctl restart docker
+
     echo "Docker và Docker Compose đã được cài đặt thành công."
 }
 
 # Cài đặt các gói cần thiết
 echo "Đang cài đặt các công cụ cần thiết..."
 apt-get update
-apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx
+apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx net-tools
 
 # Cài đặt yt-dlp thông qua pipx hoặc virtual environment
 echo "Cài đặt yt-dlp..."
@@ -282,7 +292,7 @@ EOF
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
 cat << EOF > $N8N_DIR/docker-compose.yml
-version: "3"
+# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
   n8n:
     build:
@@ -320,7 +330,7 @@ services:
     image: caddy:2
     restart: always
     ports:
-      - "80:80"
+      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
       - "443:443"
     volumes:
       - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
@@ -425,14 +435,39 @@ echo "Khởi động các container..."
 echo "Lưu ý: Quá trình build image có thể mất vài phút, vui lòng đợi..."
 cd $N8N_DIR
 
-# Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
-if command -v docker-compose &> /dev/null; then
-    docker-compose up -d
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose up -d
+# Kiểm tra cổng 80 có đang được sử dụng không
+if netstat -tuln | grep -q ":80\s"; then
+    echo "CẢNH BÁO: Cổng 80 đang được sử dụng bởi một ứng dụng khác. Caddy sẽ sử dụng cổng 8080."
+    # Đã cấu hình 8080 trong docker-compose.yml
 else
-    echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
-    exit 1
+    # Nếu cổng 80 trống, cập nhật docker-compose.yml để sử dụng cổng 80
+    sed -i 's/"8080:80"/"80:80"/g' $N8N_DIR/docker-compose.yml
+    echo "Cổng 80 đang trống. Caddy sẽ sử dụng cổng 80 mặc định."
+fi
+
+# Kiểm tra quyền truy cập Docker
+echo "Kiểm tra quyền truy cập Docker..."
+if ! docker ps &>/dev/null; then
+    echo "Khởi động container với sudo vì quyền truy cập Docker..."
+    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
+    if command -v docker-compose &> /dev/null; then
+        sudo docker-compose up -d
+    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        sudo docker compose up -d
+    else
+        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
+        exit 1
+    fi
+else
+    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
+    if command -v docker-compose &> /dev/null; then
+        docker-compose up -d
+    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        docker compose up -d
+    else
+        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
+        exit 1
+    fi
 fi
 
 # Đợi một lúc để các container có thể khởi động
@@ -441,54 +476,81 @@ sleep 15
 
 # Kiểm tra các container đã chạy chưa
 echo "Kiểm tra các container đã chạy chưa..."
-if docker ps | grep -q "n8n-ffmpeg-latest" || docker ps | grep -q "n8n"; then
+# Xác định lệnh docker phù hợp với quyền truy cập
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_CMD="docker"
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+fi
+
+if $DOCKER_CMD ps | grep -q "n8n-ffmpeg-latest" || $DOCKER_CMD ps | grep -q "n8n"; then
     echo "Container n8n đã chạy thành công."
 else
     echo "Container n8n đang được khởi động, có thể mất thêm thời gian..."
     echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    if command -v docker-compose &> /dev/null; then
-        echo "  docker-compose logs -f"
-    else
-        echo "  docker compose logs -f"
-    fi
+    echo "  $DOCKER_COMPOSE_CMD logs -f"
 fi
 
-if docker ps | grep -q "caddy:2"; then
+if $DOCKER_CMD ps | grep -q "caddy:2"; then
     echo "Container caddy đã chạy thành công."
 else
     echo "Container caddy đang được khởi động, có thể mất thêm thời gian..."
     echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    if command -v docker-compose &> /dev/null; then
-        echo "  docker-compose logs -f"
-    else
-        echo "  docker compose logs -f"
-    fi
+    echo "  $DOCKER_COMPOSE_CMD logs -f"
+fi
+
+# Hiển thị thông tin về cổng được sử dụng
+CADDY_PORT=$(grep -o '"[0-9]\+:80"' $N8N_DIR/docker-compose.yml | cut -d':' -f1 | tr -d '"')
+echo ""
+echo "Cấu hình cổng HTTP: $CADDY_PORT"
+if [ "$CADDY_PORT" = "8080" ]; then
+    echo "Sử dụng cổng 8080 cho HTTP thay vì cổng 80 mặc định (tránh xung đột)."
+    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN}:8080 hoặc https://${DOMAIN}"
+else
+    echo "Sử dụng cổng 80 mặc định cho HTTP."
+    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN} hoặc https://${DOMAIN}"
 fi
 
 # Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n
 echo "Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n..."
-N8N_CONTAINER=$(docker ps -q --filter "name=n8n" 2>/dev/null)
+
+# Xác định lệnh docker phù hợp với quyền truy cập
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+else
+    DOCKER_CMD="docker"
+fi
+
+N8N_CONTAINER=$($DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
 if [ -n "$N8N_CONTAINER" ]; then
-    if docker exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
+    if $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
         echo "FFmpeg đã được cài đặt thành công trong container n8n."
         echo "Phiên bản FFmpeg:"
-        docker exec $N8N_CONTAINER ffmpeg -version | head -n 1
+        $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version | head -n 1
     else
         echo "Lưu ý: FFmpeg có thể chưa được cài đặt đúng cách trong container."
     fi
 
-    if docker exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
+    if $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
         echo "yt-dlp đã được cài đặt thành công trong container n8n."
         echo "Phiên bản yt-dlp:"
-        docker exec $N8N_CONTAINER yt-dlp --version
+        $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version
     else
         echo "Lưu ý: yt-dlp có thể chưa được cài đặt đúng cách trong container."
     fi
     
-    if docker exec $N8N_CONTAINER chromium-browser --version &> /dev/null; then
+    if $DOCKER_CMD exec $N8N_CONTAINER chromium-browser --version &> /dev/null; then
         echo "Chromium đã được cài đặt thành công trong container n8n."
         echo "Phiên bản Chromium:"
-        docker exec $N8N_CONTAINER chromium-browser --version
+        $DOCKER_CMD exec $N8N_CONTAINER chromium-browser --version
     else
         echo "Lưu ý: Chromium có thể chưa được cài đặt đúng cách trong container."
     fi
