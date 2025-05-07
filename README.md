@@ -46,7 +46,7 @@ Script cài đặt nâng cao này giúp bạn triển khai N8N - nền tảng t�
 
 ```bash
 # Tải script
-wget -O n8n-install.sh https://raw.githubusercontent.com/your-username/n8n-installer/main/n8n-install.sh
+wget -O n8n-install.sh [https://raw.githubusercontent.com/your-username/n8n-installer/main/n8n-install.sh](https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh)
 
 # Cấp quyền thực thi
 chmod +x n8n-install.sh
