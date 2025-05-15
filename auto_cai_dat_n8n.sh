@@ -3,6 +3,7 @@
 # Hiển thị banner
 echo "======================================================================"
 echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
+echo "                (Phiên bản cải tiến với Backup Telegram)             "
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -15,49 +16,38 @@ fi
 setup_swap() {
     echo "Kiểm tra và thiết lập swap tự động..."
     
-    # Kiểm tra nếu swap đã được bật
     if [ "$(swapon --show | wc -l)" -gt 0 ]; then
         SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
         echo "Swap đã được bật với kích thước ${SWAP_SIZE}. Bỏ qua thiết lập."
         return
     fi
     
-    # Lấy thông tin RAM (đơn vị MB)
     RAM_MB=$(free -m | grep Mem | awk '{print $2}')
     
-    # Tính toán kích thước swap dựa trên RAM
     if [ "$RAM_MB" -le 2048 ]; then
-        # Với RAM <= 2GB, swap = 2x RAM
         SWAP_SIZE=$((RAM_MB * 2))
     elif [ "$RAM_MB" -gt 2048 ] && [ "$RAM_MB" -le 8192 ]; then
-        # Với 2GB < RAM <= 8GB, swap = RAM
         SWAP_SIZE=$RAM_MB
     else
-        # Với RAM > 8GB, swap = 4GB
         SWAP_SIZE=4096
     fi
     
-    # Chuyển đổi sang GB cho dễ nhìn (làm tròn lên)
     SWAP_GB=$(( (SWAP_SIZE + 1023) / 1024 ))
     
     echo "Đang thiết lập swap với kích thước ${SWAP_GB}GB (${SWAP_SIZE}MB)..."
     
-    # Tạo swap file với đơn vị MB
     dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE status=progress
     chmod 600 /swapfile
     mkswap /swapfile
     swapon /swapfile
     
-    # Thêm vào fstab để swap được kích hoạt sau khi khởi động lại
     if ! grep -q "/swapfile" /etc/fstab; then
         echo '/swapfile none swap sw 0 0' >> /etc/fstab
     fi
     
-    # Cấu hình swappiness và cache pressure
     sysctl vm.swappiness=10
     sysctl vm.vfs_cache_pressure=50
     
-    # Lưu cấu hình vào sysctl.conf nếu chưa có
     if ! grep -q "vm.swappiness" /etc/sysctl.conf; then
         echo "vm.swappiness=10" >> /etc/sysctl.conf
     fi
@@ -67,8 +57,8 @@ setup_swap() {
     fi
     
     echo "Đã thiết lập swap với kích thước ${SWAP_GB}GB thành công."
-    echo "Swappiness đã được đặt thành 10 (mặc định: 60)"
-    echo "Vfs_cache_pressure đã được đặt thành 50 (mặc định: 100)"
+    echo "Swappiness đã được đặt thành 10."
+    echo "Vfs_cache_pressure đã được đặt thành 50."
 }
 
 # Hàm hiển thị trợ giúp
@@ -108,23 +98,38 @@ done
 # Hàm kiểm tra domain
 check_domain() {
     local domain=$1
-    local server_ip=$(curl -s https://api.ipify.org)
-    local domain_ip=$(dig +short $domain)
+    local server_ip=$(curl -s https://api.ipify.org || echo "Không thể lấy IP server")
+    if [ "$server_ip" == "Không thể lấy IP server" ]; then return 1; fi
+    local domain_ip=$(dig +short $domain A)
 
     if [ "$domain_ip" = "$server_ip" ]; then
-        return 0  # Domain đã trỏ đúng
+        return 0
     else
-        return 1  # Domain chưa trỏ đúng
+        return 1
     fi
 }
 
 # Hàm kiểm tra các lệnh cần thiết
 check_commands() {
-    if ! command -v dig &> /dev/null; then
-        echo "Cài đặt dnsutils (để sử dụng lệnh dig)..."
-        apt-get update
-        apt-get install -y dnsutils
-    fi
+    for cmd in dig curl cron jq tar gzip bc docker; do
+        if ! command -v $cmd &> /dev/null; then
+            echo "Lệnh '$cmd' không tìm thấy. Đang cố gắng cài đặt..."
+            apt-get update > /dev/null
+            if [ "$cmd" == "docker" ]; then
+                install_docker # Gọi hàm cài đặt docker riêng
+            elif [ "$cmd" == "cron" ]; then
+                apt-get install -y cron
+            elif [ "$cmd" == "bc" ]; then
+                apt-get install -y bc
+            else
+                apt-get install -y dnsutils curl jq tar gzip # bc thường có sẵn
+            fi
+            if ! command -v $cmd &> /dev/null; then
+                 echo "Lỗi: Không thể cài đặt lệnh '$cmd'. Vui lòng cài đặt thủ công và chạy lại script."
+                 exit 1
+            fi
+        fi
+    done
 }
 
 # Thiết lập swap
@@ -132,37 +137,37 @@ setup_swap
 
 # Hàm cài đặt Docker
 install_docker() {
-    if $SKIP_DOCKER; then
-        echo "Bỏ qua cài đặt Docker theo yêu cầu..."
+    if $SKIP_DOCKER && command -v docker &> /dev/null; then
+        echo "Docker đã được cài đặt và bỏ qua theo yêu cầu..."
         return
     fi
     
-    echo "Cài đặt Docker và Docker Compose..."
-    apt-get update
-    apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-    
-    # Thêm khóa Docker GPG theo cách mới
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    
-    # Thêm repository Docker
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null
-    
-    # Cài đặt Docker
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io
-    
+    if command -v docker &> /dev/null; then
+        echo "Docker đã được cài đặt."
+    else
+        echo "Cài đặt Docker..."
+        apt-get update
+        apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io
+    fi
+
     # Cài đặt Docker Compose
-    if ! command -v docker-compose &> /dev/null && ! command -v docker &> /dev/null; then
-        echo "Cài đặt Docker Compose..."
-        apt-get install -y docker-compose
-    elif command -v docker &> /dev/null && ! docker compose version &> /dev/null; then
+    if command -v docker-compose &> /dev/null || (command -v docker &> /dev/null && docker compose version &> /dev/null); then
+        echo "Docker Compose (hoặc plugin) đã được cài đặt."
+    else 
         echo "Cài đặt Docker Compose plugin..."
         apt-get install -y docker-compose-plugin
+        if ! (docker compose version &> /dev/null); then 
+            echo "Không cài được plugin, thử cài docker-compose bản cũ..." 
+            apt-get install -y docker-compose 
+        fi
     fi
     
-    # Kiểm tra Docker đã cài đặt thành công chưa
     if ! command -v docker &> /dev/null; then
         echo "Lỗi: Docker chưa được cài đặt đúng cách."
         exit 1
@@ -173,59 +178,52 @@ install_docker() {
         exit 1
     fi
 
-    # Thêm user hiện tại vào nhóm docker nếu không phải root
     if [ "$SUDO_USER" != "" ]; then
-        echo "Thêm user $SUDO_USER vào nhóm docker để có thể chạy docker mà không cần sudo..."
+        echo "Thêm user $SUDO_USER vào nhóm docker..."
         usermod -aG docker $SUDO_USER
-        echo "Đã thêm user $SUDO_USER vào nhóm docker. Các thay đổi sẽ có hiệu lực sau khi đăng nhập lại."
+        echo "Đã thêm. Thay đổi có hiệu lực sau khi đăng nhập lại hoặc chạy 'newgrp docker'."
     fi
-
-    # Khởi động lại dịch vụ Docker
+    systemctl enable docker
     systemctl restart docker
-
-    echo "Docker và Docker Compose đã được cài đặt thành công."
+    echo "Docker và Docker Compose đã được cài đặt/kiểm tra thành công."
 }
 
-# Cài đặt các gói cần thiết
-echo "Đang cài đặt các công cụ cần thiết..."
-apt-get update
-apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx net-tools
+# Cài đặt các gói cần thiết (trừ Docker đã xử lý ở check_commands)
+echo "Đang kiểm tra và cài đặt các công cụ cần thiết..."
+apt-get update > /dev/null
+apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx net-tools bc
 
-# Cài đặt yt-dlp thông qua pipx hoặc virtual environment
+# Cài đặt yt-dlp
 echo "Cài đặt yt-dlp..."
 if command -v pipx &> /dev/null; then
     pipx install yt-dlp
+    pipx ensurepath
 else
-    # Tạo virtual environment và cài đặt yt-dlp vào đó
     python3 -m venv /opt/yt-dlp-venv
-    /opt/yt-dlp-venv/bin/pip install yt-dlp
+    /opt/yt-dlp-venv/bin/pip install -U pip yt-dlp
     ln -sf /opt/yt-dlp-venv/bin/yt-dlp /usr/local/bin/yt-dlp
     chmod +x /usr/local/bin/yt-dlp
 fi
+export PATH="$PATH:/usr/local/bin:/opt/yt-dlp-venv/bin:$HOME/.local/bin" # Đảm bảo yt-dlp trong PATH
 
 # Đảm bảo cron service đang chạy
 systemctl enable cron
 systemctl start cron
 
-# Kiểm tra các lệnh cần thiết
+# Kiểm tra các lệnh (bao gồm Docker)
 check_commands
 
 # Nhận input domain từ người dùng
-read -p "Nhập tên miền hoặc tên miền phụ của bạn: " DOMAIN
-
-# Kiểm tra domain
-echo "Kiểm tra domain $DOMAIN..."
-if check_domain $DOMAIN; then
-    echo "Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
-else
-    echo "Domain $DOMAIN chưa được trỏ đến server này."
-    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
-    echo "Sau khi cập nhật DNS, hãy chạy lại script này"
-    exit 1
-fi
-
-# Cài đặt Docker và Docker Compose
-install_docker
+read -p "Nhập tên miền hoặc tên miền phụ của bạn (ví dụ: n8n.example.com): " DOMAIN
+while ! check_domain $DOMAIN; do
+    echo "Domain $DOMAIN chưa được trỏ đúng đến IP server này ($(curl -s https://api.ipify.org))."
+    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)." 
+    read -p "Nhấn Enter sau khi cập nhật DNS, hoặc nhập domain khác: " NEW_DOMAIN
+    if [ -n "$NEW_DOMAIN" ]; then
+        DOMAIN="$NEW_DOMAIN"
+    fi
+done
+echo "Domain $DOMAIN đã được trỏ đúng. Tiếp tục cài đặt."
 
 # Tạo thư mục cho n8n
 echo "Tạo cấu trúc thư mục cho n8n tại $N8N_DIR..."
@@ -235,56 +233,23 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
-echo "Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
+# Tạo Dockerfile
+echo "Tạo Dockerfile..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
-
 USER root
-
-# Cài đặt FFmpeg, wget, zip và các gói phụ thuộc khác
 RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar \
-    # Puppeteer dependencies
-    chromium \
-    nss \
-    freetype \
-    freetype-dev \
-    harfbuzz \
-    ca-certificates \
-    ttf-freefont \
-    ttf-liberation \
-    font-noto \
-    font-noto-cjk \
-    font-noto-emoji \
-    dbus \
-    udev
-
-# Cài đặt yt-dlp trực tiếp sử dụng pip trong container
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar gzip \
+    chromium nss freetype freetype-dev harfbuzz ca-certificates ttf-freefont \
+    font-noto font-noto-cjk font-noto-emoji dbus udev
 RUN pip3 install --break-system-packages -U yt-dlp && \
     chmod +x /usr/bin/yt-dlp
-
-# Thiết lập biến môi trường cho Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
-# Cài đặt n8n-nodes-puppeteer
 WORKDIR /usr/local/lib/node_modules/n8n
 RUN npm install n8n-nodes-puppeteer
-
-# Kiểm tra cài đặt các công cụ
-RUN ffmpeg -version && \
-    wget --version | head -n 1 && \
-    zip --version | head -n 2 && \
-    yt-dlp --version && \
-    chromium-browser --version
-
-# Tạo thư mục youtube_content_anylystic và backup_full và set đúng quyền
-RUN mkdir -p /files/youtube_content_anylystic && \
-    mkdir -p /files/backup_full && \
+RUN mkdir -p /files/youtube_content_anylystic /files/backup_full /files/temp && \
     chown -R node:node /files
-
-# Trở lại user node
 USER node
 WORKDIR /home/node
 EOF
@@ -292,16 +257,15 @@ EOF
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
 cat << EOF > $N8N_DIR/docker-compose.yml
-# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
   n8n:
     build:
       context: .
       dockerfile: Dockerfile
-    image: n8n-ffmpeg-latest
+    image: n8n-custom-ffmpeg:latest
     restart: always
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
       - N8N_HOST=${DOMAIN}
       - N8N_PORT=5678
@@ -309,28 +273,26 @@ services:
       - NODE_ENV=production
       - WEBHOOK_URL=https://${DOMAIN}
       - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      # Cấu hình binary data mode
       - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
       - N8N_BINARY_DATA_STORAGE=/files
       - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
       - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
       - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
-      # Cấu hình Puppeteer
+      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600 # 300MB
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
     volumes:
-      - ${N8N_DIR}:/home/node/.n8n
-      - ${N8N_DIR}/files:/files
-    user: "1000:1000"
+      - ${N8N_DIR}:/home/node/.n8n  # Mount toàn bộ thư mục N8N_DIR vào /home/node/.n8n
+      - ${N8N_DIR}/files:/files      # Mount thư mục files vào /files trong container
+    user: "node"
     cap_add:
-      - SYS_ADMIN  # Thêm quyền cho Puppeteer
+      - SYS_ADMIN
 
   caddy:
-    image: caddy:2
+    image: caddy:latest
     restart: always
     ports:
-      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
+      - "80:80"
       - "443:443"
     volumes:
       - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
@@ -349,346 +311,427 @@ echo "Tạo file Caddyfile..."
 cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
+    tls internal # Hoặc email của bạn: tls your-email@example.com
 }
 EOF
 
+# Cấu hình gửi backup qua Telegram
+TELEGRAM_CONF_FILE="$N8N_DIR/telegram_backup.conf"
+read -p "Bạn có muốn cấu hình gửi file backup hàng ngày qua Telegram không? (y/n): " CONFIGURE_TELEGRAM
+if [[ "$CONFIGURE_TELEGRAM" =~ ^[Yy]$ ]]; then
+    echo "Để gửi backup qua Telegram, bạn cần một Bot Token và Chat ID."
+    echo "Hướng dẫn lấy Bot Token: Nói chuyện với BotFather trên Telegram (tìm @BotFather), gõ /newbot, làm theo hướng dẫn."
+    echo "Hướng dẫn lấy Chat ID: Nói chuyện với bot @userinfobot trên Telegram, nó sẽ hiển thị User ID của bạn."
+    echo "Nếu muốn gửi vào group, thêm bot của bạn vào group, sau đó gửi lệnh /my_id @TenBotCuaBan trong group đó (thay @TenBotCuaBan bằng username bot của bạn)." 
+    echo "Chat ID của group sẽ bắt đầu bằng dấu trừ (-)."
+    read -p "Nhập Telegram Bot Token của bạn: " TELEGRAM_BOT_TOKEN
+    read -p "Nhập Telegram Chat ID của bạn (hoặc group ID): " TELEGRAM_CHAT_ID
+    if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+        echo "TELEGRAM_BOT_TOKEN=\"$TELEGRAM_BOT_TOKEN\"" > "$TELEGRAM_CONF_FILE"
+        echo "TELEGRAM_CHAT_ID=\"$TELEGRAM_CHAT_ID\"" >> "$TELEGRAM_CONF_FILE"
+        chmod 600 "$TELEGRAM_CONF_FILE"
+        echo "Đã lưu cấu hình Telegram vào $TELEGRAM_CONF_FILE"
+    else
+        echo "Bot Token hoặc Chat ID không được cung cấp. Bỏ qua cấu hình Telegram."
+    fi
+elif [[ "$CONFIGURE_TELEGRAM" =~ ^[Nn]$ ]]; then
+    echo "Đã bỏ qua cấu hình gửi backup qua Telegram."
+    if [ -f "$TELEGRAM_CONF_FILE" ]; then # Xóa file conf cũ nếu người dùng chọn không
+        rm -f "$TELEGRAM_CONF_FILE"
+    fi
+else
+    echo "Lựa chọn không hợp lệ. Mặc định bỏ qua cấu hình Telegram."
+fi
+
 # Tạo script sao lưu workflow và credentials
-echo "Tạo script sao lưu workflow và credentials..."
+echo "Tạo script sao lưu workflow và credentials tại $N8N_DIR/backup-workflows.sh..."
 cat << EOF > $N8N_DIR/backup-workflows.sh
 #!/bin/bash
 
-# Thiết lập biến
-BACKUP_DIR="/files/backup_full"
-DATE=\$(date +"%Y%m%d_%H%M%S")
-BACKUP_FILE="\$BACKUP_DIR/n8n_backup_\$DATE.tar"
-TEMP_DIR="/tmp/n8n_backup_\$DATE"
-N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
+N8N_DIR_VALUE="$N8N_DIR"
+BACKUP_BASE_DIR="\\\${N8N_DIR_VALUE}/files/backup_full"
+LOG_FILE="\\\
+ogens_DIR_VALUE}/files/backup_full/backup.log"
+TELEGRAM_CONF_FILE="\\\
+ogens_DIR_VALUE}/telegram_backup.conf"
+DATE=\\"$(date +"%Y%m%d_%H%M%S")\"
+BACKUP_FILE_NAME="n8n_backup_\\\
+ogens_DATE.tar.gz"
+BACKUP_FILE_PATH="\\\
+ogens_BACKUP_BASE_DIR/\\\
+ogens_BACKUP_FILE_NAME"
+TEMP_DIR_HOST="/tmp/n8n_backup_host_\\\
+ogens_DATE"
+TEMP_DIR_CONTAINER_BASE="/tmp/n8n_workflow_exports"
 
-# Hàm ghi log
+TELEGRAM_FILE_SIZE_LIMIT=20971520 # 20MB
+
 log() {
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$BACKUP_DIR/backup.log
+    echo "[\\\$(date '+%Y-%m-%d %H:%M:%S')] \\\
+ogens1" | tee -a "\\\
+ogens_LOG_FILE"
 }
 
+send_telegram_message() {
+    local message="\\\
+ogens1"
+    if [ -f "\\\
+ogens_TELEGRAM_CONF_FILE" ]; then
+        source "\\\
+ogens_TELEGRAM_CONF_FILE"
+        if [ -n "\\\
+ogens_TELEGRAM_BOT_TOKEN" ] && [ -n "\\\
+ogens_TELEGRAM_CHAT_ID" ]; then
+            (curl -s -X POST "https://api.telegram.org/bot\\\
+ogens_TELEGRAM_BOT_TOKEN/sendMessage" \
+                -d chat_id="\\\
+ogens_TELEGRAM_CHAT_ID" \
+                -d text="\\\
+ogensmessage" \
+                -d parse_mode="Markdown" > /dev/null 2>&1) &
+        fi
+    fi
+}
+
+send_telegram_document() {
+    local file_path="\\\
+ogens1"
+    local caption="\\\
+ogens2"
+    if [ -f "\\\
+ogens_TELEGRAM_CONF_FILE" ]; then
+        source "\\\
+ogens_TELEGRAM_CONF_FILE"
+        if [ -n "\\\
+ogens_TELEGRAM_BOT_TOKEN" ] && [ -n "\\\
+ogens_TELEGRAM_CHAT_ID" ]; then
+            local file_size=\\\"$(du -b "\\\
+ogensfile_path" | cut -f1)\\\"
+            if [ "\\\
+ogensfile_size" -le "\\\
+ogens_TELEGRAM_FILE_SIZE_LIMIT" ]; then
+                log "Đang gửi file backup qua Telegram: \\\
+ogens{file_path}"
+                (curl -s -X POST "https://api.telegram.org/bot\\\
+ogens_TELEGRAM_BOT_TOKEN/sendDocument" \
+                    -F chat_id="\\\
+ogens_TELEGRAM_CHAT_ID" \
+                    -F document=@"\\\
+ogensfile_path" \
+                    -F caption="\\\
+ogenscaption" > /dev/null 2>&1) &
+            else
+                local readable_size=\\\"$(echo "scale=2; \\\
+ogensfile_size / 1024 / 1024" | bc)\\\"
+                log "File backup quá lớn (\\\
+ogens{readable_size} MB) để gửi qua Telegram. Sẽ chỉ gửi thông báo."
+                send_telegram_message "Hoàn tất sao lưu N8N. File backup '\\\
+ogens_BACKUP_FILE_NAME' (\\\
+ogens{readable_size}MB) quá lớn để gửi. Nó được lưu tại: \\\
+ogens{file_path} trên server."
+            fi
+        fi
+    fi
+}
+
+mkdir -p "\\\
+ogens_BACKUP_BASE_DIR"
 log "Bắt đầu sao lưu workflows và credentials..."
+send_telegram_message "Bắt đầu quá trình sao lưu N8N hàng ngày cho domain: $DOMAIN..."
 
-# Tạo thư mục tạm thời
-mkdir -p \$TEMP_DIR
-mkdir -p \$TEMP_DIR/workflows
-mkdir -p \$TEMP_DIR/credentials
-mkdir -p \$BACKUP_DIR
+N8N_CONTAINER_NAME_PATTERN="n8n"
+N8N_CONTAINER_ID=\\\"$(docker ps -q --filter "name=\\
+ogens_N8N_CONTAINER_NAME_PATTERN" --format '{{.ID}}' | head -n 1)\\\"
 
-# Kiểm tra container n8n có đang chạy không
-if [ -z "\$N8N_CONTAINER" ]; then
-    log "Lỗi: Không tìm thấy container n8n đang chạy"
-    rm -rf \$TEMP_DIR
+if [ -z "\\\
+ogens_N8N_CONTAINER_ID" ]; then
+    log "Lỗi: Không tìm thấy container n8n đang chạy."
+    send_telegram_message "Lỗi sao lưu N8N ($DOMAIN): Không tìm thấy container n8n đang chạy."
     exit 1
 fi
+log "Tìm thấy container N8N ID: \\\
+ogens_N8N_CONTAINER_ID"
 
-# Xuất danh sách workflow IDs
-log "Xuất danh sách workflow IDs..."
-docker exec \$N8N_CONTAINER n8n export:workflow --all --quiet
+mkdir -p "\\\
+ogens_TEMP_DIR_HOST/workflows"
+mkdir -p "\\\
+ogens_TEMP_DIR_HOST/credentials"
 
-# Xuất từng workflow ra file JSON riêng
-log "Xuất workflows ra file JSON..."
-WORKFLOWS=\$(docker exec \$N8N_CONTAINER n8n list:workflows --json)
-if [ -z "\$WORKFLOWS" ]; then
-    log "Cảnh báo: Không tìm thấy workflow nào"
+# Tạo thư mục export tạm thời bên trong container (đảm bảo nó là duy nhất cho lần chạy này)
+TEMP_DIR_CONTAINER_UNIQUE="\\\
+ogens_TEMP_DIR_CONTAINER_BASE/export_\\\
+ogens_DATE"
+docker exec "\\\
+ogens_N8N_CONTAINER_ID" mkdir -p "\\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE"
+
+log "Xuất workflows vào \\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE trong container..." 
+WORKFLOWS_JSON=\\\"$(docker exec "\\\
+ogens_N8N_CONTAINER_ID" n8n list:workflow --json)\\\"
+
+if [ -z "\\\
+ogens_WORKFLOWS_JSON" ] || [ "\\\
+ogens_WORKFLOWS_JSON" == "[]" ]; then
+    log "Cảnh báo: Không tìm thấy workflow nào để sao lưu."
 else
-    echo "\$WORKFLOWS" | jq -c '.[]' | while read -r workflow; do
-        id=\$(echo "\$workflow" | jq -r '.id')
-        name=\$(echo "\$workflow" | jq -r '.name' | tr -dc '[:alnum:][:space:]' | tr '[:space:]' '_')
-        log "Đang xuất workflow: \$name (ID: \$id)"
-        docker exec \$N8N_CONTAINER n8n export:workflow --id="\$id" --output="\$TEMP_DIR/workflows/\$id-\$name.json"
+    echo "\\\
+ogens_WORKFLOWS_JSON" | jq -c '.[]' | while IFS= read -r workflow; do
+        id=\\\"$(echo "\\\
+ogensworkflow" | jq -r '.id')\\\"
+        name=\\\"$(echo "\\\
+ogensworkflow" | jq -r '.name' | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')\\\"
+        safe_name=\\\"$(echo "\\\
+ogensname" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-100)\\\"
+        output_file_container="\\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE/\\\
+ogensid-\\
+ogenssafe_name.json"
+        log "Đang xuất workflow: '\\\
+ogensname' (ID: \\\
+ogensid) vào container: \\\
+ogensoutput_file_container"
+        if docker exec "\\\
+ogens_N8N_CONTAINER_ID" n8n export:workflow --id="\\\
+ogensid" --output="\\\
+ogensoutput_file_container"; then
+            log "Đã xuất workflow ID \\\
+ogensid thành công."
+        else
+            log "Lỗi khi xuất workflow ID \\\
+ogensid."
+        fi
     done
+
+    log "Sao chép workflows từ container \\\
+ogens_N8N_CONTAINER_ID:\\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE vào host \\\
+ogens_TEMP_DIR_HOST/workflows"
+    if docker cp "\\\
+ogens_N8N_CONTAINER_ID:\\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE/." "\\\
+ogens_TEMP_DIR_HOST/workflows/"; then
+        log "Sao chép workflows từ container ra host thành công."
+    else
+        log "Lỗi khi sao chép workflows từ container ra host."
+    fi
 fi
 
-# Sao lưu thư mục .n8n
-log "Sao lưu thư mục .n8n chứa credentials..."
-cp -r /home/node/.n8n/database.sqlite \$TEMP_DIR/credentials/
-cp -r /home/node/.n8n/encryptionKey \$TEMP_DIR/credentials/
+DB_PATH_HOST="\\\
+ogens_N8N_DIR_VALUE/database.sqlite"
+KEY_PATH_HOST="\\\
+ogens_N8N_DIR_VALUE/encryptionKey"
 
-# Tạo file tar
-log "Tạo file tar: \$BACKUP_FILE"
-tar -cf \$BACKUP_FILE -C \$(dirname \$TEMP_DIR) \$(basename \$TEMP_DIR)
+log "Sao lưu database và encryption key từ host..."
+if [ -f "\\\
+ogens_DB_PATH_HOST" ]; then
+    cp "\\\
+ogens_DB_PATH_HOST" "\\\
+ogens_TEMP_DIR_HOST/credentials/database.sqlite"
+    log "Đã sao lưu database.sqlite"
+else
+    log "Lỗi: Không tìm thấy file database.sqlite tại \\\
+ogens_DB_PATH_HOST"
+fi
 
-# Xóa thư mục tạm thời
-log "Dọn dẹp thư mục tạm thời..."
-rm -rf \$TEMP_DIR
+if [ -f "\\\
+ogens_KEY_PATH_HOST" ]; then
+    cp "\\\
+ogens_KEY_PATH_HOST" "\\\
+ogens_TEMP_DIR_HOST/credentials/encryptionKey"
+    log "Đã sao lưu encryptionKey"
+else
+    log "Lỗi: Không tìm thấy file encryptionKey tại \\\
+ogens_KEY_PATH_HOST"
+fi
 
-# Giữ lại tối đa 30 bản sao lưu gần nhất
-log "Giữ lại 30 bản sao lưu gần nhất..."
-ls -t \$BACKUP_DIR/n8n_backup_*.tar | tail -n +31 | xargs -r rm
+log "Tạo file nén tar.gz: \\\
+ogens_BACKUP_FILE_PATH"
+if tar -czf "\\\
+ogens_BACKUP_FILE_PATH" -C "\\\
+ogens_TEMP_DIR_HOST" . ; then
+    log "Tạo file backup \\\
+ogens_BACKUP_FILE_PATH thành công."
+    send_telegram_document "\\\
+ogens_BACKUP_FILE_PATH" "Sao lưu N8N ($DOMAIN) hàng ngày hoàn tất: \\\
+ogens_BACKUP_FILE_NAME"
+else
+    log "Lỗi: Không thể tạo file backup \\\
+ogens_BACKUP_FILE_PATH."
+    send_telegram_message "Lỗi sao lưu N8N ($DOMAIN): Không thể tạo file backup. Kiểm tra log tại \\\
+ogens_LOG_FILE"
+fi
 
-log "Sao lưu hoàn tất: \$BACKUP_FILE"
+log "Dọn dẹp thư mục tạm..."
+rm -rf "\\\
+ogens_TEMP_DIR_HOST"
+docker exec "\\\
+ogens_N8N_CONTAINER_ID" rm -rf "\\\
+ogens_TEMP_DIR_CONTAINER_UNIQUE"
+
+log "Giữ lại 30 bản sao lưu gần nhất trong \\\
+ogens_BACKUP_BASE_DIR..."
+find "\\\
+ogens_BACKUP_BASE_DIR" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f -printf '%T@ %p\\n' | \
+sort -nr | tail -n +31 | cut -d' ' -f2- | xargs -r rm -f
+
+log "Sao lưu hoàn tất: \\\
+ogens_BACKUP_FILE_PATH"
+if [ -f "\\\
+ogens_BACKUP_FILE_PATH" ]; then
+    send_telegram_message "Hoàn tất sao lưu N8N ($DOMAIN). File: \\\
+ogens_BACKUP_FILE_NAME. Log: \\\
+ogens_LOG_FILE"
+else
+    send_telegram_message "Sao lưu N8N ($DOMAIN) thất bại. Kiểm tra log tại \\\
+ogens_LOG_FILE"
+fi
+
+exit 0
 EOF
 
 # Đặt quyền thực thi cho script sao lưu
 chmod +x $N8N_DIR/backup-workflows.sh
 
-# Đặt quyền cho thư mục n8n
-echo "Đặt quyền cho thư mục n8n..."
-chown -R 1000:1000 $N8N_DIR
-chmod -R 755 $N8N_DIR
+# Đặt quyền cho thư mục n8n (đảm bảo user node (1000) có thể ghi vào .n8n và files)
+# User `node` trong container n8nio/n8n thường có UID 1000.
+# Nếu thư mục $N8N_DIR được tạo bởi root, cần chown cho user sẽ chạy n8n (thường là 1000)
+# Hoặc, nếu docker-compose chạy n8n với user: "node", docker sẽ tự xử lý quyền trong volume.
+# Tuy nhiên, để script backup (chạy bởi root qua cron) có thể đọc $N8N_DIR/database.sqlite, quyền phải phù hợp.
+# $N8N_DIR nên thuộc root, nhưng $N8N_DIR/database.sqlite và $N8N_DIR/encryptionKey phải đọc được bởi root.
+# Và container n8n (user node) phải ghi được vào $N8N_DIR (là /home/node/.n8n trong container).
+# Cách đơn giản nhất là chown $N8N_DIR cho user 1000 (node) nếu nó được mount vào /home/node/.n8n
+echo "Đặt quyền cho thư mục n8n tại $N8N_DIR..."
+# Đảm bảo thư mục gốc $N8N_DIR tồn tại và có quyền phù hợp cho Docker mount
+sudo chown -R 1000:1000 $N8N_DIR 
+sudo chmod -R u+rwX,g+rX,o+rX $N8N_DIR
+# Thư mục files cũng cần quyền tương tự nếu n8n ghi vào đó
+sudo chown -R 1000:1000 $N8N_DIR/files
+sudo chmod -R u+rwX,g+rX,o+rX $N8N_DIR/files
 
 # Khởi động các container
-echo "Khởi động các container..."
-echo "Lưu ý: Quá trình build image có thể mất vài phút, vui lòng đợi..."
+echo "Khởi động các container... Quá trình build image có thể mất vài phút..."
 cd $N8N_DIR
 
-# Kiểm tra cổng 80 có đang được sử dụng không
-if netstat -tuln | grep -q ":80\s"; then
-    echo "CẢNH BÁO: Cổng 80 đang được sử dụng bởi một ứng dụng khác. Caddy sẽ sử dụng cổng 8080."
-    # Đã cấu hình 8080 trong docker-compose.yml
+# Xác định lệnh docker-compose
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
 else
-    # Nếu cổng 80 trống, cập nhật docker-compose.yml để sử dụng cổng 80
-    sed -i 's/"8080:80"/"80:80"/g' $N8N_DIR/docker-compose.yml
-    echo "Cổng 80 đang trống. Caddy sẽ sử dụng cổng 80 mặc định."
+    echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose plugin."
+    exit 1
 fi
 
-# Kiểm tra quyền truy cập Docker
-echo "Kiểm tra quyền truy cập Docker..."
-if ! docker ps &>/dev/null; then
-    echo "Khởi động container với sudo vì quyền truy cập Docker..."
-    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
-    if command -v docker-compose &> /dev/null; then
-        sudo docker-compose up -d
-    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        sudo docker compose up -d
-    else
-        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
-        exit 1
-    fi
-else
-    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
-    if command -v docker-compose &> /dev/null; then
-        docker-compose up -d
-    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        docker compose up -d
-    else
-        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
-        exit 1
-    fi
+# Build và khởi động
+if ! $DOCKER_COMPOSE_CMD build; then
+    echo "Lỗi: Build Docker image thất bại."
+    exit 1
+fi
+if ! $DOCKER_COMPOSE_CMD up -d; then
+    echo "Lỗi: Khởi động container thất bại."
+    exit 1
 fi
 
-# Đợi một lúc để các container có thể khởi động
-echo "Đợi các container khởi động..."
-sleep 15
+echo "Đợi các container khởi động (30 giây)..."
+sleep 30
 
 # Kiểm tra các container đã chạy chưa
-echo "Kiểm tra các container đã chạy chưa..."
-# Xác định lệnh docker phù hợp với quyền truy cập
-if ! docker ps &>/dev/null; then
-    DOCKER_CMD="sudo docker"
-    DOCKER_COMPOSE_CMD="sudo docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="sudo docker compose"
-    fi
-else
-    DOCKER_CMD="docker"
-    DOCKER_COMPOSE_CMD="docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="docker compose"
-    fi
-fi
-
-if $DOCKER_CMD ps | grep -q "n8n-ffmpeg-latest" || $DOCKER_CMD ps | grep -q "n8n"; then
+echo "Kiểm tra trạng thái các container..."
+if $DOCKER_COMPOSE_CMD ps | grep -q "n8n"; then # Kiểm tra tên service trong docker-compose
     echo "Container n8n đã chạy thành công."
 else
-    echo "Container n8n đang được khởi động, có thể mất thêm thời gian..."
-    echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    echo "  $DOCKER_COMPOSE_CMD logs -f"
+    echo "Cảnh báo: Container n8n có thể chưa chạy. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs n8n"
 fi
-
-if $DOCKER_CMD ps | grep -q "caddy:2"; then
+if $DOCKER_COMPOSE_CMD ps | grep -q "caddy"; then
     echo "Container caddy đã chạy thành công."
 else
-    echo "Container caddy đang được khởi động, có thể mất thêm thời gian..."
-    echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    echo "  $DOCKER_COMPOSE_CMD logs -f"
+    echo "Cảnh báo: Container caddy có thể chưa chạy. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs caddy"
 fi
 
-# Hiển thị thông tin về cổng được sử dụng
-CADDY_PORT=$(grep -o '"[0-9]\+:80"' $N8N_DIR/docker-compose.yml | cut -d':' -f1 | tr -d '"')
-echo ""
-echo "Cấu hình cổng HTTP: $CADDY_PORT"
-if [ "$CADDY_PORT" = "8080" ]; then
-    echo "Sử dụng cổng 8080 cho HTTP thay vì cổng 80 mặc định (tránh xung đột)."
-    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN}:8080 hoặc https://${DOMAIN}"
-else
-    echo "Sử dụng cổng 80 mặc định cho HTTP."
-    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN} hoặc https://${DOMAIN}"
-fi
-
-# Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n
-echo "Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n..."
-
-# Xác định lệnh docker phù hợp với quyền truy cập
-if ! docker ps &>/dev/null; then
-    DOCKER_CMD="sudo docker"
-else
-    DOCKER_CMD="docker"
-fi
-
-N8N_CONTAINER=$($DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
-if [ -n "$N8N_CONTAINER" ]; then
-    if $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
-        echo "FFmpeg đã được cài đặt thành công trong container n8n."
-        echo "Phiên bản FFmpeg:"
-        $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version | head -n 1
-    else
-        echo "Lưu ý: FFmpeg có thể chưa được cài đặt đúng cách trong container."
-    fi
-
-    if $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
-        echo "yt-dlp đã được cài đặt thành công trong container n8n."
-        echo "Phiên bản yt-dlp:"
-        $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version
-    else
-        echo "Lưu ý: yt-dlp có thể chưa được cài đặt đúng cách trong container."
-    fi
-    
-    if $DOCKER_CMD exec $N8N_CONTAINER chromium-browser --version &> /dev/null; then
-        echo "Chromium đã được cài đặt thành công trong container n8n."
-        echo "Phiên bản Chromium:"
-        $DOCKER_CMD exec $N8N_CONTAINER chromium-browser --version
-    else
-        echo "Lưu ý: Chromium có thể chưa được cài đặt đúng cách trong container."
-    fi
-else
-    echo "Lưu ý: Không thể kiểm tra công cụ ngay lúc này. Container n8n chưa sẵn sàng."
-fi
-
-# Tạo script kiểm tra cập nhật tự động
-echo "Tạo script cập nhật tự động..."
+# Tạo script cập nhật tự động (giữ nguyên từ script gốc)
+echo "Tạo script cập nhật tự động tại $N8N_DIR/update-n8n.sh..."
 cat << EOF > $N8N_DIR/update-n8n.sh
 #!/bin/bash
-
-# Đường dẫn đến thư mục n8n
-N8N_DIR="$N8N_DIR"
-
-# Hàm ghi log
-log() {
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> \$N8N_DIR/update.log
-}
-
+N8N_DIR_VALUE="$N8N_DIR"
+LOG_FILE="\\\
+ogens_N8N_DIR_VALUE/update.log"
+log() { echo "[\\\$(date '+%Y-%m-%d %H:%M:%S')] \\\
+ogens1" >> "\\\
+ogens_LOG_FILE"; }
 log "Bắt đầu kiểm tra cập nhật..."
-
-# Kiểm tra Docker command
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
-    log "Không tìm thấy lệnh docker-compose hoặc docker compose."
-    exit 1
-fi
-
-# Cập nhật yt-dlp trên host
-log "Cập nhật yt-dlp trên host system..."
-if command -v pipx &> /dev/null; then
-    pipx upgrade yt-dlp
-elif [ -d "/opt/yt-dlp-venv" ]; then
-    /opt/yt-dlp-venv/bin/pip install -U yt-dlp
-else
-    log "Không tìm thấy cài đặt yt-dlp đã biết"
-fi
-
-# Lấy phiên bản hiện tại
-CURRENT_IMAGE_ID=\$(docker images -q n8n-ffmpeg-latest)
-if [ -z "\$CURRENT_IMAGE_ID" ]; then
-    log "Không tìm thấy image n8n-ffmpeg-latest"
-    exit 1
-fi
-
-# Kiểm tra và xóa image gốc n8nio/n8n cũ nếu cần
-OLD_BASE_IMAGE_ID=\$(docker images -q n8nio/n8n)
-
-# Pull image gốc mới nhất
-log "Kéo image n8nio/n8n mới nhất"
-docker pull n8nio/n8n
-
-# Lấy image ID mới
-NEW_BASE_IMAGE_ID=\$(docker images -q n8nio/n8n)
-
-# Kiểm tra xem image gốc đã thay đổi chưa
-if [ "\$NEW_BASE_IMAGE_ID" != "\$OLD_BASE_IMAGE_ID" ]; then
-    log "Phát hiện image mới (\${NEW_BASE_IMAGE_ID}), tiến hành cập nhật..."
-    
-    # Sao lưu dữ liệu n8n
-    BACKUP_DATE=\$(date '+%Y%m%d_%H%M%S')
-    BACKUP_FILE="\$N8N_DIR/backup_\${BACKUP_DATE}.zip"
-    log "Tạo bản sao lưu tại \$BACKUP_FILE"
-    zip -r \$BACKUP_FILE \$N8N_DIR -x \$N8N_DIR/update-n8n.sh -x \$N8N_DIR/backup_* -x \$N8N_DIR/files/temp/* -x \$N8N_DIR/Dockerfile -x \$N8N_DIR/docker-compose.yml
-    
-    # Build lại image n8n-ffmpeg
-    cd \$N8N_DIR
-    log "Đang build lại image n8n-ffmpeg-latest..."
-    \$DOCKER_COMPOSE build
-    
-    # Khởi động lại container
-    log "Khởi động lại container..."
-    \$DOCKER_COMPOSE down
-    \$DOCKER_COMPOSE up -d
-    
-    log "Cập nhật hoàn tất, phiên bản mới: \${NEW_BASE_IMAGE_ID}"
-else
-    log "Không có cập nhật mới cho n8n"
-    
-    # Cập nhật yt-dlp trong container
-    log "Cập nhật yt-dlp trong container n8n..."
-    N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
-    if [ -n "\$N8N_CONTAINER" ]; then
-        docker exec -u root \$N8N_CONTAINER pip3 install --break-system-packages -U yt-dlp
-        log "yt-dlp đã được cập nhật thành công trong container"
+cd "\\\
+ogens_N8N_DIR_VALUE"
+if command -v docker-compose &> /dev/null; then DOCKER_COMPOSE="docker-compose"; elif command -v docker &> /dev/null && docker compose version &> /dev/null; then DOCKER_COMPOSE="docker compose"; else log "Lỗi: Docker Compose không tìm thấy."; exit 1; fi
+log "Cập nhật yt-dlp trên host..."
+if command -v pipx &> /dev/null; then pipx upgrade yt-dlp; elif [ -d "/opt/yt-dlp-venv" ]; then /opt/yt-dlp-venv/bin/pip install -U yt-dlp; fi
+log "Kéo image n8nio/n8n mới nhất..."
+docker pull n8nio/n8n:latest
+CURRENT_CUSTOM_IMAGE_ID=\\\"$(\\$DOCKER_COMPOSE images -q n8n)\\\"
+log "Build lại image custom n8n..."
+if ! \\$DOCKER_COMPOSE build n8n; then log "Lỗi build image custom."; exit 1; fi
+NEW_CUSTOM_IMAGE_ID=\\\"$(\\$DOCKER_COMPOSE images -q n8n)\\\"
+if [ "\\\
+ogens_CURRENT_CUSTOM_IMAGE_ID" != "\\\
+ogens_NEW_CUSTOM_IMAGE_ID" ]; then
+    log "Phát hiện image mới, tiến hành cập nhật n8n..."
+    # Chạy backup trước khi cập nhật
+    log "Chạy backup trước khi cập nhật..."
+    if [ -x "\\\
+ogens_N8N_DIR_VALUE/backup-workflows.sh" ]; then
+        "\\\
+ogens_N8N_DIR_VALUE/backup-workflows.sh"
     else
-        log "Không tìm thấy container n8n đang chạy"
+        log "Không tìm thấy script backup-workflows.sh hoặc không có quyền thực thi."
     fi
+    log "Dừng và khởi động lại container n8n..."
+    \\$DOCKER_COMPOSE down
+    \\$DOCKER_COMPOSE up -d n8n caddy # Đảm bảo caddy cũng được khởi động lại nếu cần
+    log "Cập nhật n8n hoàn tất."
+else
+    log "Không có cập nhật mới cho image n8n custom."
 fi
+log "Cập nhật yt-dlp trong container n8n..."
+N8N_CONTAINER_FOR_UPDATE=\\\"$(\\$DOCKER_COMPOSE ps -q n8n)\\\"
+if [ -n "\\\
+ogens_N8N_CONTAINER_FOR_UPDATE" ]; then
+    docker exec -u root "\\\
+ogens_N8N_CONTAINER_FOR_UPDATE" pip3 install --break-system-packages -U yt-dlp
+    log "yt-dlp trong container đã được cập nhật."
+else
+    log "Không tìm thấy container n8n đang chạy để cập nhật yt-dlp."
+fi
+log "Kiểm tra cập nhật hoàn tất."
 EOF
-
-# Đặt quyền thực thi cho script cập nhật
 chmod +x $N8N_DIR/update-n8n.sh
 
-# Tạo cron job để chạy mỗi 12 giờ
-echo "Thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày..."
+# Thiết lập cron job
+CRON_USER=$(whoami) # Chạy cron với user hiện tại (root)
 UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
 BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
-(crontab -l 2>/dev/null | grep -v "update-n8n.sh\|backup-workflows.sh"; echo "$UPDATE_CRON"; echo "$BACKUP_CRON") | crontab -
+(crontab -u $CRON_USER -l 2>/dev/null | grep -v "update-n8n.sh" | grep -v "backup-workflows.sh"; echo "$UPDATE_CRON"; echo "$BACKUP_CRON") | crontab -u $CRON_USER -
+echo "Đã thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày lúc 2 giờ sáng."
 
 echo "======================================================================"
-echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, Puppeteer và SSL sử dụng Caddy."
+echo "N8n đã được cài đặt và cấu hình với FFmpeg, yt-dlp, Puppeteer và SSL."
 echo "Truy cập https://${DOMAIN} để sử dụng."
 
-# Hiển thị thông tin về swap
 if [ "$(swapon --show | wc -l)" -gt 0 ]; then
-    SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
-    echo "► Swap đã được thiết lập:"
-    echo "  - Kích thước: ${SWAP_SIZE}"
-    echo "  - Swappiness: $(cat /proc/sys/vm/swappiness) (Mức càng thấp càng ưu tiên dùng RAM)"
-    echo "  - Vfs_cache_pressure: $(cat /proc/sys/vm/vfs_cache_pressure) (Mức càng thấp càng giữ cache lâu hơn)"
+    SWAP_INFO=$(free -h | grep Swap | awk '{print $2}')
+    echo "► Swap đã được thiết lập: $SWAP_INFO"
 fi
 echo "Các file cấu hình và dữ liệu được lưu trong $N8N_DIR"
-echo ""
-echo "► Tính năng tự động cập nhật đã được thiết lập:"
-echo "  - Kiểm tra cập nhật mỗi 12 giờ"
-echo "  - Log cập nhật được lưu tại $N8N_DIR/update.log"
-echo "  - Tự động sao lưu trước khi cập nhật"
-echo "  - Tự động cập nhật yt-dlp trên cả host và container"
-echo ""
+echo "► Tính năng tự động cập nhật: Kiểm tra mỗi 12 giờ. Log: $N8N_DIR/update.log"
 echo "► Tính năng sao lưu workflow và credentials:"
-echo "  - Sao lưu tự động hàng ngày vào lúc 2 giờ sáng"
-echo "  - File sao lưu được lưu tại $N8N_DIR/files/backup_full với tên theo thời gian"
-echo "  - Giữ lại 30 bản sao lưu gần nhất"
-echo "  - Log sao lưu được lưu tại $N8N_DIR/files/backup_full/backup.log"
-echo ""
-echo "► Thông tin về thư mục tải video:"
-echo "  - Thư mục lưu video YouTube: $N8N_DIR/files/youtube_content_anylystic/"
-echo ""
-echo "► Thông tin về Puppeteer:"
-echo "  - Chromium Browser đã được cài đặt trong container cho Puppeteer"
-echo "  - n8n-nodes-puppeteer package đã được cài đặt sẵn"
-echo "  - Để sử dụng nút Puppeteer trong n8n, tìm kiếm 'Puppeteer' trong bộ nút"
-echo ""
-echo "Lưu ý: Có thể mất vài phút để SSL được cấu hình hoàn tất."
-echo "Script được chỉnh sửa từ script gốc của Nguyễn Ngọc Thiện, https://www.youtube.com/@EtoolsAICONTENT"
+echo "  - Sao lưu tự động hàng ngày vào lúc 2 giờ sáng."
+necho "  - File sao lưu: $N8N_DIR/files/backup_full/n8n_backup_YYYYMMDD_HHMMSS.tar.gz"
+echo "  - Giữ lại 30 bản sao lưu gần nhất."
+echo "  - Log sao lưu: $N8N_DIR/files/backup_full/backup.log"
+if [ -f "$TELEGRAM_CONF_FILE" ]; then
+    echo "  - Thông báo và file backup (nếu <20MB) sẽ được gửi qua Telegram."
+    echo "  - Cấu hình Telegram: $TELEGRAM_CONF_FILE"
+fi
+echo "► Thư mục tải video YouTube: $N8N_DIR/files/youtube_content_anylystic/"
+echo "► Puppeteer đã được cài đặt trong container."
 echo "======================================================================"
+
