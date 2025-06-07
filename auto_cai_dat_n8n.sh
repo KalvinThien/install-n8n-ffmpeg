@@ -247,7 +247,8 @@ RUN pip3 install --break-system-packages -U yt-dlp && \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 WORKDIR /usr/local/lib/node_modules/n8n
-RUN npm install n8n-nodes-puppeteer
+# Cài đặt n8n-nodes-puppeteer với cơ chế bỏ qua lỗi
+RUN npm install n8n-nodes-puppeteer || echo "Cảnh báo: Không thể cài đặt n8n-nodes-puppeteer, tiếp tục mà không có nó"
 RUN mkdir -p /files/youtube_content_anylystic /files/backup_full /files/temp && \
     chown -R node:node /files
 USER node
@@ -345,250 +346,159 @@ fi
 
 # Tạo script sao lưu workflow và credentials
 echo "Tạo script sao lưu workflow và credentials tại $N8N_DIR/backup-workflows.sh..."
-cat << EOF > $N8N_DIR/backup-workflows.sh
+cat << 'EOF' > $N8N_DIR/backup-workflows.sh
 #!/bin/bash
 
 N8N_DIR_VALUE="$N8N_DIR"
-BACKUP_BASE_DIR="\\\${N8N_DIR_VALUE}/files/backup_full"
-LOG_FILE="\\\
-ogens_DIR_VALUE}/files/backup_full/backup.log"
-TELEGRAM_CONF_FILE="\\\
-ogens_DIR_VALUE}/telegram_backup.conf"
-DATE=\\"$(date +"%Y%m%d_%H%M%S")\"
-BACKUP_FILE_NAME="n8n_backup_\\\
-ogens_DATE.tar.gz"
-BACKUP_FILE_PATH="\\\
-ogens_BACKUP_BASE_DIR/\\\
-ogens_BACKUP_FILE_NAME"
-TEMP_DIR_HOST="/tmp/n8n_backup_host_\\\
-ogens_DATE"
+BACKUP_BASE_DIR="${N8N_DIR_VALUE}/files/backup_full"
+LOG_FILE="${N8N_DIR_VALUE}/files/backup_full/backup.log"
+TELEGRAM_CONF_FILE="${N8N_DIR_VALUE}/telegram_backup.conf"
+DATE="$(date +"%Y%m%d_%H%M%S")"
+BACKUP_FILE_NAME="n8n_backup_${DATE}.tar.gz"
+BACKUP_FILE_PATH="${BACKUP_BASE_DIR}/${BACKUP_FILE_NAME}"
+TEMP_DIR_HOST="/tmp/n8n_backup_host_${DATE}"
 TEMP_DIR_CONTAINER_BASE="/tmp/n8n_workflow_exports"
 
 TELEGRAM_FILE_SIZE_LIMIT=20971520 # 20MB
 
 log() {
-    echo "[\\\$(date '+%Y-%m-%d %H:%M:%S')] \\\
-ogens1" | tee -a "\\\
-ogens_LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "${LOG_FILE}"
 }
 
 send_telegram_message() {
-    local message="\\\
-ogens1"
-    if [ -f "\\\
-ogens_TELEGRAM_CONF_FILE" ]; then
-        source "\\\
-ogens_TELEGRAM_CONF_FILE"
-        if [ -n "\\\
-ogens_TELEGRAM_BOT_TOKEN" ] && [ -n "\\\
-ogens_TELEGRAM_CHAT_ID" ]; then
-            (curl -s -X POST "https://api.telegram.org/bot\\\
-ogens_TELEGRAM_BOT_TOKEN/sendMessage" \
-                -d chat_id="\\\
-ogens_TELEGRAM_CHAT_ID" \
-                -d text="\\\
-ogensmessage" \
+    local message="$1"
+    if [ -f "${TELEGRAM_CONF_FILE}" ]; then
+        source "${TELEGRAM_CONF_FILE}"
+        if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+            (curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+                -d chat_id="${TELEGRAM_CHAT_ID}" \
+                -d text="${message}" \
                 -d parse_mode="Markdown" > /dev/null 2>&1) &
         fi
     fi
 }
 
 send_telegram_document() {
-    local file_path="\\\
-ogens1"
-    local caption="\\\
-ogens2"
-    if [ -f "\\\
-ogens_TELEGRAM_CONF_FILE" ]; then
-        source "\\\
-ogens_TELEGRAM_CONF_FILE"
-        if [ -n "\\\
-ogens_TELEGRAM_BOT_TOKEN" ] && [ -n "\\\
-ogens_TELEGRAM_CHAT_ID" ]; then
-            local file_size=\\\"$(du -b "\\\
-ogensfile_path" | cut -f1)\\\"
-            if [ "\\\
-ogensfile_size" -le "\\\
-ogens_TELEGRAM_FILE_SIZE_LIMIT" ]; then
-                log "Đang gửi file backup qua Telegram: \\\
-ogens{file_path}"
-                (curl -s -X POST "https://api.telegram.org/bot\\\
-ogens_TELEGRAM_BOT_TOKEN/sendDocument" \
-                    -F chat_id="\\\
-ogens_TELEGRAM_CHAT_ID" \
-                    -F document=@"\\\
-ogensfile_path" \
-                    -F caption="\\\
-ogenscaption" > /dev/null 2>&1) &
+    local file_path="$1"
+    local caption="$2"
+    if [ -f "${TELEGRAM_CONF_FILE}" ]; then
+        source "${TELEGRAM_CONF_FILE}"
+        if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+            local file_size="$(du -b "${file_path}" | cut -f1)"
+            if [ "${file_size}" -le "${TELEGRAM_FILE_SIZE_LIMIT}" ]; then
+                log "Đang gửi file backup qua Telegram: ${file_path}"
+                (curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+                    -F chat_id="${TELEGRAM_CHAT_ID}" \
+                    -F document=@"${file_path}" \
+                    -F caption="${caption}" > /dev/null 2>&1) &
             else
-                local readable_size=\\\"$(echo "scale=2; \\\
-ogensfile_size / 1024 / 1024" | bc)\\\"
-                log "File backup quá lớn (\\\
-ogens{readable_size} MB) để gửi qua Telegram. Sẽ chỉ gửi thông báo."
-                send_telegram_message "Hoàn tất sao lưu N8N. File backup '\\\
-ogens_BACKUP_FILE_NAME' (\\\
-ogens{readable_size}MB) quá lớn để gửi. Nó được lưu tại: \\\
-ogens{file_path} trên server."
+                local readable_size="$(echo "scale=2; ${file_size} / 1024 / 1024" | bc)"
+                log "File backup quá lớn (${readable_size} MB) để gửi qua Telegram. Sẽ chỉ gửi thông báo."
+                send_telegram_message "Hoàn tất sao lưu N8N. File backup '${BACKUP_FILE_NAME}' (${readable_size}MB) quá lớn để gửi. Nó được lưu tại: ${file_path} trên server."
             fi
         fi
     fi
 }
 
-mkdir -p "\\\
-ogens_BACKUP_BASE_DIR"
+mkdir -p "${BACKUP_BASE_DIR}"
 log "Bắt đầu sao lưu workflows và credentials..."
 send_telegram_message "Bắt đầu quá trình sao lưu N8N hàng ngày cho domain: $DOMAIN..."
 
 N8N_CONTAINER_NAME_PATTERN="n8n"
-N8N_CONTAINER_ID=\\\"$(docker ps -q --filter "name=\\
-ogens_N8N_CONTAINER_NAME_PATTERN" --format '{{.ID}}' | head -n 1)\\\"
+N8N_CONTAINER_ID="$(docker ps -q --filter "name=${N8N_CONTAINER_NAME_PATTERN}" --format '{{.ID}}' | head -n 1)"
 
-if [ -z "\\\
-ogens_N8N_CONTAINER_ID" ]; then
+if [ -z "${N8N_CONTAINER_ID}" ]; then
     log "Lỗi: Không tìm thấy container n8n đang chạy."
     send_telegram_message "Lỗi sao lưu N8N ($DOMAIN): Không tìm thấy container n8n đang chạy."
     exit 1
 fi
-log "Tìm thấy container N8N ID: \\\
-ogens_N8N_CONTAINER_ID"
+log "Tìm thấy container N8N ID: ${N8N_CONTAINER_ID}"
 
-mkdir -p "\\\
-ogens_TEMP_DIR_HOST/workflows"
-mkdir -p "\\\
-ogens_TEMP_DIR_HOST/credentials"
+mkdir -p "${TEMP_DIR_HOST}/workflows"
+mkdir -p "${TEMP_DIR_HOST}/credentials"
 
 # Tạo thư mục export tạm thời bên trong container (đảm bảo nó là duy nhất cho lần chạy này)
-TEMP_DIR_CONTAINER_UNIQUE="\\\
-ogens_TEMP_DIR_CONTAINER_BASE/export_\\\
-ogens_DATE"
-docker exec "\\\
-ogens_N8N_CONTAINER_ID" mkdir -p "\\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE"
+TEMP_DIR_CONTAINER_UNIQUE="${TEMP_DIR_CONTAINER_BASE}/export_${DATE}"
+docker exec "${N8N_CONTAINER_ID}" mkdir -p "${TEMP_DIR_CONTAINER_UNIQUE}"
 
-log "Xuất workflows vào \\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE trong container..." 
-WORKFLOWS_JSON=\\\"$(docker exec "\\\
-ogens_N8N_CONTAINER_ID" n8n list:workflow --json)\\\"
+log "Xuất workflows vào ${TEMP_DIR_CONTAINER_UNIQUE} trong container..." 
+WORKFLOWS_JSON="$(docker exec "${N8N_CONTAINER_ID}" n8n list:workflow --json 2>/dev/null || echo "[]")"
 
-if [ -z "\\\
-ogens_WORKFLOWS_JSON" ] || [ "\\\
-ogens_WORKFLOWS_JSON" == "[]" ]; then
+if [ -z "${WORKFLOWS_JSON}" ] || [ "${WORKFLOWS_JSON}" == "[]" ]; then
     log "Cảnh báo: Không tìm thấy workflow nào để sao lưu."
 else
-    echo "\\\
-ogens_WORKFLOWS_JSON" | jq -c '.[]' | while IFS= read -r workflow; do
-        id=\\\"$(echo "\\\
-ogensworkflow" | jq -r '.id')\\\"
-        name=\\\"$(echo "\\\
-ogensworkflow" | jq -r '.name' | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')\\\"
-        safe_name=\\\"$(echo "\\\
-ogensname" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-100)\\\"
-        output_file_container="\\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE/\\\
-ogensid-\\
-ogenssafe_name.json"
-        log "Đang xuất workflow: '\\\
-ogensname' (ID: \\\
-ogensid) vào container: \\\
-ogensoutput_file_container"
-        if docker exec "\\\
-ogens_N8N_CONTAINER_ID" n8n export:workflow --id="\\\
-ogensid" --output="\\\
-ogensoutput_file_container"; then
-            log "Đã xuất workflow ID \\\
-ogensid thành công."
-        else
-            log "Lỗi khi xuất workflow ID \\\
-ogensid."
+    echo "${WORKFLOWS_JSON}" | jq -c '.[]' 2>/dev/null | while IFS= read -r workflow; do
+        id="$(echo "${workflow}" | jq -r '.id' 2>/dev/null || echo "")"
+        name="$(echo "${workflow}" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')"
+        safe_name="$(echo "${name}" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-100)"
+        
+        if [ -n "${id}" ] && [ "${id}" != "null" ]; then
+            output_file_container="${TEMP_DIR_CONTAINER_UNIQUE}/${id}-${safe_name}.json"
+            log "Đang xuất workflow: '${name}' (ID: ${id}) vào container: ${output_file_container}"
+            if docker exec "${N8N_CONTAINER_ID}" n8n export:workflow --id="${id}" --output="${output_file_container}" 2>/dev/null; then
+                log "Đã xuất workflow ID ${id} thành công."
+            else
+                log "Lỗi khi xuất workflow ID ${id}."
+            fi
         fi
     done
 
-    log "Sao chép workflows từ container \\\
-ogens_N8N_CONTAINER_ID:\\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE vào host \\\
-ogens_TEMP_DIR_HOST/workflows"
-    if docker cp "\\\
-ogens_N8N_CONTAINER_ID:\\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE/." "\\\
-ogens_TEMP_DIR_HOST/workflows/"; then
+    log "Sao chép workflows từ container ${N8N_CONTAINER_ID}:${TEMP_DIR_CONTAINER_UNIQUE} vào host ${TEMP_DIR_HOST}/workflows"
+    if docker cp "${N8N_CONTAINER_ID}:${TEMP_DIR_CONTAINER_UNIQUE}/." "${TEMP_DIR_HOST}/workflows/" 2>/dev/null; then
         log "Sao chép workflows từ container ra host thành công."
     else
         log "Lỗi khi sao chép workflows từ container ra host."
     fi
 fi
 
-DB_PATH_HOST="\\\
-ogens_N8N_DIR_VALUE/database.sqlite"
-KEY_PATH_HOST="\\\
-ogens_N8N_DIR_VALUE/encryptionKey"
+DB_PATH_HOST="${N8N_DIR_VALUE}/database.sqlite"
+KEY_PATH_HOST="${N8N_DIR_VALUE}/encryptionKey"
 
 log "Sao lưu database và encryption key từ host..."
-if [ -f "\\\
-ogens_DB_PATH_HOST" ]; then
-    cp "\\\
-ogens_DB_PATH_HOST" "\\\
-ogens_TEMP_DIR_HOST/credentials/database.sqlite"
+if [ -f "${DB_PATH_HOST}" ]; then
+    cp "${DB_PATH_HOST}" "${TEMP_DIR_HOST}/credentials/database.sqlite"
     log "Đã sao lưu database.sqlite"
 else
-    log "Lỗi: Không tìm thấy file database.sqlite tại \\\
-ogens_DB_PATH_HOST"
+    log "Lỗi: Không tìm thấy file database.sqlite tại ${DB_PATH_HOST}"
 fi
 
-if [ -f "\\\
-ogens_KEY_PATH_HOST" ]; then
-    cp "\\\
-ogens_KEY_PATH_HOST" "\\\
-ogens_TEMP_DIR_HOST/credentials/encryptionKey"
+if [ -f "${KEY_PATH_HOST}" ]; then
+    cp "${KEY_PATH_HOST}" "${TEMP_DIR_HOST}/credentials/encryptionKey"
     log "Đã sao lưu encryptionKey"
 else
-    log "Lỗi: Không tìm thấy file encryptionKey tại \\\
-ogens_KEY_PATH_HOST"
+    log "Lỗi: Không tìm thấy file encryptionKey tại ${KEY_PATH_HOST}"
 fi
 
-log "Tạo file nén tar.gz: \\\
-ogens_BACKUP_FILE_PATH"
-if tar -czf "\\\
-ogens_BACKUP_FILE_PATH" -C "\\\
-ogens_TEMP_DIR_HOST" . ; then
-    log "Tạo file backup \\\
-ogens_BACKUP_FILE_PATH thành công."
-    send_telegram_document "\\\
-ogens_BACKUP_FILE_PATH" "Sao lưu N8N ($DOMAIN) hàng ngày hoàn tất: \\\
-ogens_BACKUP_FILE_NAME"
+log "Tạo file nén tar.gz: ${BACKUP_FILE_PATH}"
+if tar -czf "${BACKUP_FILE_PATH}" -C "${TEMP_DIR_HOST}" . 2>/dev/null; then
+    log "Tạo file backup ${BACKUP_FILE_PATH} thành công."
+    send_telegram_document "${BACKUP_FILE_PATH}" "Sao lưu N8N ($DOMAIN) hàng ngày hoàn tất: ${BACKUP_FILE_NAME}"
 else
-    log "Lỗi: Không thể tạo file backup \\\
-ogens_BACKUP_FILE_PATH."
-    send_telegram_message "Lỗi sao lưu N8N ($DOMAIN): Không thể tạo file backup. Kiểm tra log tại \\\
-ogens_LOG_FILE"
+    log "Lỗi: Không thể tạo file backup ${BACKUP_FILE_PATH}."
+    send_telegram_message "Lỗi sao lưu N8N ($DOMAIN): Không thể tạo file backup. Kiểm tra log tại ${LOG_FILE}"
 fi
 
 log "Dọn dẹp thư mục tạm..."
-rm -rf "\\\
-ogens_TEMP_DIR_HOST"
-docker exec "\\\
-ogens_N8N_CONTAINER_ID" rm -rf "\\\
-ogens_TEMP_DIR_CONTAINER_UNIQUE"
+rm -rf "${TEMP_DIR_HOST}"
+docker exec "${N8N_CONTAINER_ID}" rm -rf "${TEMP_DIR_CONTAINER_UNIQUE}" 2>/dev/null || true
 
-log "Giữ lại 30 bản sao lưu gần nhất trong \\\
-ogens_BACKUP_BASE_DIR..."
-find "\\\
-ogens_BACKUP_BASE_DIR" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f -printf '%T@ %p\\n' | \
+log "Giữ lại 30 bản sao lưu gần nhất trong ${BACKUP_BASE_DIR}..."
+find "${BACKUP_BASE_DIR}" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f -printf '%T@ %p\n' 2>/dev/null | \
 sort -nr | tail -n +31 | cut -d' ' -f2- | xargs -r rm -f
 
-log "Sao lưu hoàn tất: \\\
-ogens_BACKUP_FILE_PATH"
-if [ -f "\\\
-ogens_BACKUP_FILE_PATH" ]; then
-    send_telegram_message "Hoàn tất sao lưu N8N ($DOMAIN). File: \\\
-ogens_BACKUP_FILE_NAME. Log: \\\
-ogens_LOG_FILE"
+log "Sao lưu hoàn tất: ${BACKUP_FILE_PATH}"
+if [ -f "${BACKUP_FILE_PATH}" ]; then
+    send_telegram_message "Hoàn tất sao lưu N8N ($DOMAIN). File: ${BACKUP_FILE_NAME}. Log: ${LOG_FILE}"
 else
-    send_telegram_message "Sao lưu N8N ($DOMAIN) thất bại. Kiểm tra log tại \\\
-ogens_LOG_FILE"
+    send_telegram_message "Sao lưu N8N ($DOMAIN) thất bại. Kiểm tra log tại ${LOG_FILE}"
 fi
 
 exit 0
 EOF
+
+# Thay thế biến $N8N_DIR và $DOMAIN trong script
+sed -i "s|\$N8N_DIR|$N8N_DIR|g" $N8N_DIR/backup-workflows.sh
+sed -i "s|\$DOMAIN|$DOMAIN|g" $N8N_DIR/backup-workflows.sh
 
 # Đặt quyền thực thi cho script sao lưu
 chmod +x $N8N_DIR/backup-workflows.sh
@@ -623,13 +533,44 @@ else
     exit 1
 fi
 
-# Build và khởi động
+echo "Đang build Docker image... (có thể mất vài phút)"
 if ! $DOCKER_COMPOSE_CMD build; then
-    echo "Lỗi: Build Docker image thất bại."
-    exit 1
+    echo "Cảnh báo: Build Docker image với Puppeteer thất bại."
+    echo "Đang thử build lại với Dockerfile đơn giản hơa..."
+    
+    # Tạo Dockerfile đơn giản hơn nếu build ban đầu thất bại
+    cat << 'EOF' > $N8N_DIR/Dockerfile.simple
+FROM n8nio/n8n:latest
+USER root
+RUN apk update && \
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar gzip \
+    chromium nss freetype freetype-dev harfbuzz ca-certificates ttf-freefont \
+    font-noto font-noto-cjk font-noto-emoji dbus udev
+RUN pip3 install --break-system-packages -U yt-dlp && \
+    chmod +x /usr/bin/yt-dlp
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+RUN mkdir -p /files/youtube_content_anylystic /files/backup_full /files/temp && \
+    chown -R node:node /files
+USER node
+WORKDIR /home/node
+EOF
+    
+    # Cập nhật docker-compose.yml để sử dụng Dockerfile đơn giản
+    sed -i 's/dockerfile: Dockerfile/dockerfile: Dockerfile.simple/' $N8N_DIR/docker-compose.yml
+    
+    if ! $DOCKER_COMPOSE_CMD build; then
+        echo "Lỗi: Không thể build Docker image thậm chí với cấu hình đơn giản."
+        echo "Kiểm tra kết nối mạng và thử lại."
+        exit 1
+    fi
+    echo "Build thành công với cấu hình đơn giản (không có Puppeteer nodes)."
 fi
+
+echo "Đang khởi động các container..."
 if ! $DOCKER_COMPOSE_CMD up -d; then
     echo "Lỗi: Khởi động container thất bại."
+    echo "Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
     exit 1
 fi
 
@@ -654,49 +595,39 @@ echo "Tạo script cập nhật tự động tại $N8N_DIR/update-n8n.sh..."
 cat << EOF > $N8N_DIR/update-n8n.sh
 #!/bin/bash
 N8N_DIR_VALUE="$N8N_DIR"
-LOG_FILE="\\\
-ogens_N8N_DIR_VALUE/update.log"
-log() { echo "[\\\$(date '+%Y-%m-%d %H:%M:%S')] \\\
-ogens1" >> "\\\
-ogens_LOG_FILE"; }
+LOG_FILE="$N8N_DIR_VALUE/update.log"
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"; }
 log "Bắt đầu kiểm tra cập nhật..."
-cd "\\\
-ogens_N8N_DIR_VALUE"
+cd "$N8N_DIR_VALUE"
 if command -v docker-compose &> /dev/null; then DOCKER_COMPOSE="docker-compose"; elif command -v docker &> /dev/null && docker compose version &> /dev/null; then DOCKER_COMPOSE="docker compose"; else log "Lỗi: Docker Compose không tìm thấy."; exit 1; fi
 log "Cập nhật yt-dlp trên host..."
 if command -v pipx &> /dev/null; then pipx upgrade yt-dlp; elif [ -d "/opt/yt-dlp-venv" ]; then /opt/yt-dlp-venv/bin/pip install -U yt-dlp; fi
 log "Kéo image n8nio/n8n mới nhất..."
 docker pull n8nio/n8n:latest
-CURRENT_CUSTOM_IMAGE_ID=\\\"$(\\$DOCKER_COMPOSE images -q n8n)\\\"
+CURRENT_CUSTOM_IMAGE_ID="$(docker images -q n8n)"
 log "Build lại image custom n8n..."
-if ! \\$DOCKER_COMPOSE build n8n; then log "Lỗi build image custom."; exit 1; fi
-NEW_CUSTOM_IMAGE_ID=\\\"$(\\$DOCKER_COMPOSE images -q n8n)\\\"
-if [ "\\\
-ogens_CURRENT_CUSTOM_IMAGE_ID" != "\\\
-ogens_NEW_CUSTOM_IMAGE_ID" ]; then
+if ! $DOCKER_COMPOSE build n8n; then log "Lỗi build image custom."; exit 1; fi
+NEW_CUSTOM_IMAGE_ID="$(docker images -q n8n)"
+if [ "$CURRENT_CUSTOM_IMAGE_ID" != "$NEW_CUSTOM_IMAGE_ID" ]; then
     log "Phát hiện image mới, tiến hành cập nhật n8n..."
     # Chạy backup trước khi cập nhật
     log "Chạy backup trước khi cập nhật..."
-    if [ -x "\\\
-ogens_N8N_DIR_VALUE/backup-workflows.sh" ]; then
-        "\\\
-ogens_N8N_DIR_VALUE/backup-workflows.sh"
+    if [ -x "$N8N_DIR_VALUE/backup-workflows.sh" ]; then
+        "$N8N_DIR_VALUE/backup-workflows.sh"
     else
         log "Không tìm thấy script backup-workflows.sh hoặc không có quyền thực thi."
     fi
     log "Dừng và khởi động lại container n8n..."
-    \\$DOCKER_COMPOSE down
-    \\$DOCKER_COMPOSE up -d n8n caddy # Đảm bảo caddy cũng được khởi động lại nếu cần
+    $DOCKER_COMPOSE down
+    $DOCKER_COMPOSE up -d n8n caddy # Đảm bảo caddy cũng được khởi động lại nếu cần
     log "Cập nhật n8n hoàn tất."
 else
     log "Không có cập nhật mới cho image n8n custom."
 fi
 log "Cập nhật yt-dlp trong container n8n..."
-N8N_CONTAINER_FOR_UPDATE=\\\"$(\\$DOCKER_COMPOSE ps -q n8n)\\\"
-if [ -n "\\\
-ogens_N8N_CONTAINER_FOR_UPDATE" ]; then
-    docker exec -u root "\\\
-ogens_N8N_CONTAINER_FOR_UPDATE" pip3 install --break-system-packages -U yt-dlp
+N8N_CONTAINER_FOR_UPDATE="$(docker ps -q n8n)"
+if [ -n "$N8N_CONTAINER_FOR_UPDATE" ]; then
+    docker exec -u root $N8N_CONTAINER_FOR_UPDATE pip3 install --break-system-packages -U yt-dlp
     log "yt-dlp trong container đã được cập nhật."
 else
     log "Không tìm thấy container n8n đang chạy để cập nhật yt-dlp."
@@ -724,7 +655,7 @@ echo "Các file cấu hình và dữ liệu được lưu trong $N8N_DIR"
 echo "► Tính năng tự động cập nhật: Kiểm tra mỗi 12 giờ. Log: $N8N_DIR/update.log"
 echo "► Tính năng sao lưu workflow và credentials:"
 echo "  - Sao lưu tự động hàng ngày vào lúc 2 giờ sáng."
-necho "  - File sao lưu: $N8N_DIR/files/backup_full/n8n_backup_YYYYMMDD_HHMMSS.tar.gz"
+echo "  - File sao lưu: $N8N_DIR/files/backup_full/n8n_backup_YYYYMMDD_HHMMSS.tar.gz"
 echo "  - Giữ lại 30 bản sao lưu gần nhất."
 echo "  - Log sao lưu: $N8N_DIR/files/backup_full/backup.log"
 if [ -f "$TELEGRAM_CONF_FILE" ]; then
