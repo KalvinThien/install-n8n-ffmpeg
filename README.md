@@ -17,7 +17,6 @@
 
 Script cài đặt nâng cao này giúp bạn triển khai N8N - nền tảng tự động hóa workflow mạnh mẽ - với đầy đủ các công cụ tiện ích như FFmpeg, yt-dlp, và Puppeteer. Script đã được tối ưu để vận hành mượt mà trên các phiên bản Ubuntu mới nhất, tự động cấu hình SSL với Caddy, và nay được tăng cường với **hệ thống backup tin cậy hơn cùng tùy chọn gửi thông báo và file backup qua Telegram**.
 
-Toàn bộ quá trình cài đặt và các thông báo tương tác với người dùng đều được **Việt hóa hoàn toàn**.
 
 ![Terminal Preview](https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-screenshot.png)
 
