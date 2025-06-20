@@ -721,6 +721,7 @@ RUN apk update && apk add --no-cache \\
     ffmpeg \\
     python3 \\
     py3-pip \\
+    py3-virtualenv \\
     chromium \\
     chromium-chromedriver \\
     ttf-freefont \\
@@ -734,11 +735,17 @@ RUN apk update && apk add --no-cache \\
     tar \\
     gzip
 
-# Cài đặt yt-dlp
-RUN pip3 install --no-cache-dir yt-dlp
+# Tạo virtual environment cho Python packages
+RUN python3 -m venv /opt/python-venv
 
-# Cài đặt các thư viện Python bổ sung
-RUN pip3 install --no-cache-dir requests beautifulsoup4 lxml
+# Cài đặt yt-dlp trong virtual environment
+RUN /opt/python-venv/bin/pip install --no-cache-dir yt-dlp
+
+# Tạo symlink để có thể sử dụng yt-dlp globally
+RUN ln -s /opt/python-venv/bin/yt-dlp /usr/local/bin/yt-dlp
+
+# Cài đặt các thư viện Python bổ sung trong virtual environment
+RUN /opt/python-venv/bin/pip install --no-cache-dir requests beautifulsoup4 lxml
 
 # Thiết lập biến môi trường cho Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
@@ -754,6 +761,9 @@ RUN npx playwright install chromium
 # Tạo thư mục và set quyền
 RUN mkdir -p /home/node/files && chown -R node:node /home/node/files
 RUN mkdir -p /home/node/.cache && chown -R node:node /home/node/.cache
+
+# Đảm bảo yt-dlp có thể chạy được
+RUN chmod +x /usr/local/bin/yt-dlp
 
 # Chuyển về user node
 USER node
@@ -1200,9 +1210,19 @@ if ! docker ps &>/dev/null; then
     echo "Khởi động container với sudo vì quyền truy cập Docker..."
     # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
     if command -v docker-compose &> /dev/null; then
-        sudo docker-compose up -d
+        if ! sudo docker-compose up -d; then
+            echo "❌ Lỗi khởi động containers. Chạy debug:"
+            echo "   sudo docker-compose logs"
+            echo "   sudo docker-compose build --no-cache"
+            INSTALL_ISSUES="$INSTALL_ISSUES\n- Docker containers khởi động thất bại"
+        fi
     elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        sudo docker compose up -d
+        if ! sudo docker compose up -d; then
+            echo "❌ Lỗi khởi động containers. Chạy debug:"
+            echo "   sudo docker compose logs"
+            echo "   sudo docker compose build --no-cache"
+            INSTALL_ISSUES="$INSTALL_ISSUES\n- Docker containers khởi động thất bại"
+        fi
     else
         echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
         exit 1
@@ -1210,9 +1230,19 @@ if ! docker ps &>/dev/null; then
 else
     # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
     if command -v docker-compose &> /dev/null; then
-        docker-compose up -d
+        if ! docker-compose up -d; then
+            echo "❌ Lỗi khởi động containers. Chạy debug:"
+            echo "   docker-compose logs"
+            echo "   docker-compose build --no-cache"
+            INSTALL_ISSUES="$INSTALL_ISSUES\n- Docker containers khởi động thất bại"
+        fi
     elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        docker compose up -d
+        if ! docker compose up -d; then
+            echo "❌ Lỗi khởi động containers. Chạy debug:"
+            echo "   docker compose logs"
+            echo "   docker compose build --no-cache"
+            INSTALL_ISSUES="$INSTALL_ISSUES\n- Docker containers khởi động thất bại"
+        fi
     else
         echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
         exit 1
@@ -1256,6 +1286,16 @@ elif [ -d "/opt/yt-dlp-venv" ]; then
     /opt/yt-dlp-venv/bin/pip install -U yt-dlp
 else
     log "Không tìm thấy cài đặt yt-dlp đã biết"
+fi
+
+# Cập nhật yt-dlp trong container
+log "Cập nhật yt-dlp trong N8N container..."
+N8N_CONTAINER=\$(docker ps -q --filter "name=n8n" 2>/dev/null)
+if [ -n "\$N8N_CONTAINER" ]; then
+    docker exec \$N8N_CONTAINER /opt/python-venv/bin/pip install -U yt-dlp
+    log "Đã cập nhật yt-dlp trong container"
+else
+    log "Không tìm thấy N8N container để cập nhật yt-dlp"
 fi
 
 # Lấy phiên bản hiện tại
@@ -1376,7 +1416,7 @@ echo "🔧 Hướng dẫn debug:"
 echo "1. Nếu DNS chưa đúng: Cập nhật bản ghi A record"
 echo "2. Nếu container không chạy: docker-compose restart"
 echo "3. Nếu SSL lỗi: Đợi 2-5 phút để Let's Encrypt cấp cert"
-echo "4. Xem logs chi tiết: docker-compose logs -f caddy"
+echo "4. Xem logs chi tiết: docker-compose logs -f"
 echo "======================================================================"
 EOF
 
@@ -1461,6 +1501,13 @@ echo ""
     echo "   - Health check: curl https://$API_DOMAIN/health"
     echo "   - API docs: https://$API_DOMAIN/docs"
 fi
+
+echo ""
+echo "🛠️ Debug và Troubleshooting:"
+echo "   - Kiểm tra SSL: $N8N_DIR/check-ssl.sh"
+echo "   - Xem logs: docker-compose logs -f"
+echo "   - Rebuild containers: docker-compose build --no-cache"
+echo "   - Restart all: docker-compose restart"
 
 echo ""
 echo "Cảm ơn bạn đã sử dụng script cài đặt N8N tự động! 🚀"
