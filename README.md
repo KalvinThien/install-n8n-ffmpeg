@@ -1,19 +1,67 @@
-# 🚀 N8N Advanced Installation Script
+# 🚀 Script Cài Đặt N8N Tự Động với FastAPI & Telegram Backup
 
-<div align="center">
-
-![N8N Logo](https://n8n.io/favicon.ico) 
-
-[![Bash Script](https://img.shields.io/badge/bash-script-brightgreen.svg)](https://www.gnu.org/software/bash/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![N8N](https://img.shields.io/badge/N8N-Workflow%20Automation-orange.svg)](https://n8n.io/)
+[![Version](https://img.shields.io/badge/version-v2.1.0-blue.svg)](https://github.com/your-repo/n8n-auto-install)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![N8N](https://img.shields.io/badge/N8N-Latest-orange.svg)](https://n8n.io)
+[![Docker](https://img.shields.io/badge/Docker-Required-blue.svg)](https://docker.com)
 
-**Cài đặt N8N chuyên nghiệp với FFmpeg, yt-dlp, Puppeteer, SSL tự động và Backup Telegram nâng cao**
+> 🎉 **Chào mừng bạn đến với script cài đặt N8N tự động!** 
+> 
+> 📺 **Hãy ủng hộ kênh YouTube của mình nhé!** Đăng ký ngay tại [**@kalvinthiensocial**](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1) để không bỏ lỡ những video hướng dẫn N8N, automation và nhiều tip hay ho khác! 🔔
+> 
+> 🎬 **Playlist N8N đặc biệt**: [N8N Tutorials](https://www.youtube.com/@kalvinthiensocial/playlists) - Từ cơ bản đến nâng cao!
 
-</div>
+Script tự động cài đặt N8N với đầy đủ tính năng: FFmpeg, yt-dlp, Puppeteer, FastAPI Article Crawler, Telegram Backup và SSL tự động.
 
-## ✨ Tổng quan
+## 👨‍💻 Tác Giả & Liên Hệ
+
+**Nguyễn Ngọc Thiện** - Developer & Content Creator
+
+- 📺 **YouTube**: [kalvinthiensocial](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1) - *Đăng ký để ủng hộ mình nhé!* 🙏
+- 🎬 **N8N Playlist**: [Hướng dẫn N8N từ A-Z](https://www.youtube.com/@kalvinthiensocial/playlists)
+- 📘 **Facebook**: [@Ban.Thien.Handsome](https://www.facebook.com/Ban.Thien.Handsome/)
+- 💬 **Zalo/Phone**: 08.8888.4749
+- 📧 **Support**: Liên hệ qua Zalo hoặc Facebook để được hỗ trợ trực tiếp!
+
+> 💡 **Tip**: Nếu bạn thấy script này hữu ích, hãy chia sẻ với bạn bè và **đăng ký kênh YouTube** để ủng hộ mình tạo ra nhiều content hay hơn nữa! 🚀
+
+## 📋 Mục Lục
+
+- [✨ Tính Năng Mới](#-tính-năng-mới)
+- [🎯 Tính Năng Chính](#-tính-năng-chính)
+- [⚡ Cài Đặt Nhanh](#-cài-đặt-nhanh)
+- [🔧 Cấu Hình](#-cấu-hình)
+- [📖 Hướng Dẫn API](#-hướng-dẫn-api)
+- [🎬 Telegram Backup](#-telegram-backup)
+- [💾 Backup & Restore](#-backup--restore)
+- [🔄 Cập Nhật](#-cập-nhật)
+- [🛠️ Quản Lý](#️-quản-lý)
+- [❓ FAQ](#-faq)
+- [📝 Changelog](#-changelog)
+
+## ✨ Tính Năng Mới
+
+### 🆕 Phiên Bản v2.1.0 (20/06/2025)
+
+**🎉 Các tính năng mới được thêm:**
+
+- **🔧 DNS Debug Tool**: Script debug DNS chuyên sâu để khắc phục lỗi SSL
+- **🐳 Docker Build Optimization**: Sửa lỗi Python externally-managed-environment 
+- **📊 Enhanced Logging**: Logs chi tiết hơn cho từng service (N8N, API, Caddy)
+- 🌐 **Subdomain Architecture**: API hoàn toàn tách biệt với subdomain riêng
+- ⚡ **Auto-Continue Install**: Script tự động tiếp tục dù có DNS warning
+- 🔍 **Real-time DNS Check**: Kiểm tra DNS realtime với debug output
+- 🛠️ **Better Error Handling**: Xử lý lỗi tốt hơn với fallback options
+
+**🛠️ Cải tiến:**
+
+- DNS validation được viết lại hoàn toàn
+- Docker build process ổn định hơn với virtual environment
+- SSL certificate tự động retry khi DNS được cập nhật
+- Debug tools được tích hợp sẵn trong script
+- Performance optimization cho container startup
+
+## 🎯 Tính Năng Chính
 
 Script cài đặt nâng cao này giúp bạn triển khai N8N - nền tảng tự động hóa workflow mạnh mẽ - với đầy đủ các công cụ tiện ích như FFmpeg, yt-dlp, và Puppeteer. Script đã được tối ưu để vận hành mượt mà trên các phiên bản Ubuntu mới nhất, tự động cấu hình SSL với Caddy, và nay được tăng cường với **hệ thống backup tin cậy hơn cùng tùy chọn gửi thông báo và file backup qua Telegram**.
 
@@ -170,7 +218,7 @@ Các tham số `vm.swappiness` (đặt thành 10) và `vm.vfs_cache_pressure` (�
     - Kiểm tra log backup tại `$N8N_DIR/files/backup_full/backup.log`.
 - **Vấn đề khác**: Xem thêm trong các file log hoặc liên hệ hỗ trợ.
 
-## 📜 Miễn trừ trách nhiệm
+## 📜 Miễn Trừ Trách Nhiệm
 
 - Script này được cung cấp "NGUYÊN TRẠNG" mà không có bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý.
 - Người dùng hoàn toàn chịu trách nhiệm về việc sử dụng script này và mọi hậu quả có thể phát sinh.
@@ -178,46 +226,121 @@ Các tham số `vm.swappiness` (đặt thành 10) và `vm.vfs_cache_pressure` (�
 - Tác giả không chịu trách nhiệm cho bất kỳ mất mát dữ liệu, gián đoạn dịch vụ hoặc thiệt hại nào khác do việc sử dụng script này gây ra.
 - Vui lòng tự kiểm tra và hiểu rõ script trước khi thực thi trên môi trường production.
 
-## 👨‍💻 Thông tin và hỗ trợ
-
-### Liên hệ
-
-- **Zalo/Phone**: 0888884749
-- **GitHub**: [Github/KalvinThien](https://github.com/KalvinThien)
-
-### Donate
-
-Nếu bạn thấy dự án này hữu ích, hãy xem xét hỗ trợ để phát triển thêm tính năng mới:
-
-- **TP Bank**: 0888884749
-- **Chủ tài khoản**: Nguyễn Ngọc Thiện
-
-<div align="center">
-  <img src="https://github.com/KalvinThien/install-n8n-ffmpeg/blob/main/qrcode.png?raw=true" alt="QR Code Donate" width="400" />
-</div>
-
 ## 📝 Changelog
 
-### v1.4.1 (15/05/2025) - Bản cập nhật hiện tại
-- ✅ **Cải tiến Hướng dẫn & Hoàn thiện Script**:
-    - **Ưu tiên lệnh cài đặt nhanh** trong README.
-    - **Bổ sung hướng dẫn chi tiết** cách lấy Telegram Bot Token và Chat ID.
-    - **Thêm mục Miễn trừ trách nhiệm** vào README.
-    - Sửa các lỗi nhỏ về định dạng Markdown/HTML trong README.
-    - Cập nhật ngày phát hành cho phiên bản này.
-- ✅ **Cải tiến Backup Lớn & Tích hợp Telegram (từ v1.4.0)**:
-    - Sửa lỗi logic và đường dẫn trong script backup (`backup-workflows.sh`) để đảm bảo sao lưu chính xác workflows, database (`database.sqlite`), và encryption key.
-    - File backup được nén dưới dạng `.tar.gz`.
-    - Tùy chọn cấu hình gửi thông báo trạng thái backup và file backup (nếu < 20MB) hàng ngày qua Telegram.
-    - Hướng dẫn chi tiết bằng tiếng Việt trong quá trình cài đặt để cấu hình Telegram.
-    - Cải thiện log chi tiết cho quá trình backup.
-    - Dọn dẹp các bản backup cũ an toàn hơn.
-- 🇻🇳 **Việt hóa hoàn toàn (từ v1.4.0)**: Tất cả các thông báo, câu hỏi trong script cài đặt đều bằng tiếng Việt.
-- 🛠️ **Cải tiến Script Cài đặt (từ v1.4.0)**:
-    - Kiểm tra và cài đặt các gói phụ thuộc mạnh mẽ hơn.
-    - Cải thiện logic kiểm tra và cài đặt Docker & Docker Compose.
-    - Tối ưu hóa quyền truy cập thư mục cho N8N và script backup.
-    - Script cập nhật (`update-n8n.sh`) giờ đây sẽ tự động chạy backup trước khi cập nhật N8N.
+**✨ Tính năng:**
+- N8N with FFmpeg, yt-dlp, Puppeteer
+- Docker containerization
+- SSL with Let's Encrypt
+- Basic backup system
+
+### v2.1.0 (20/06/2025)
+**🚀 Bản cập nhật lớn - DNS Debug & Docker Optimization**
+
+**✨ Tính năng mới:**
+- 🔧 **DNS Debug Tool**: Thêm script `debug-dns.sh` để troubleshoot DNS issues
+- 🐳 **Docker Build Fix**: Khắc phục lỗi Python externally-managed-environment
+- 📊 **Enhanced Logging**: Logs riêng biệt cho N8N, FastAPI và Caddy
+- 🌐 **Subdomain API**: API hoàn toàn tách biệt với subdomain riêng
+- ⚡ **Auto-Continue**: Script tự động tiếp tục cài đặt dù có DNS warning
+- 🔍 **Real-time DNS Check**: Kiểm tra DNS với debug output chi tiết
+
+**🛠️ Cải tiến:**
+- DNS validation engine được viết lại hoàn toàn
+- Docker build process sử dụng virtual environment
+- SSL certificate tự động retry mechanism
+- Error handling tốt hơn với multiple fallback options
+- Performance optimization cho container startup time
+
+**🐛 Bug fixes:**
+- Sửa lỗi Python pip install trong Alpine Linux
+- Khắc phục DNS checking với multiple IP records
+- Fix whitespace issues trong DNS responses
+- Cải thiện container restart reliability
+
+### v2.0.0 (15/06/2025)
+**🎉 Major Release - FastAPI & Telegram Integration**
+
+**✨ Tính năng mới:**
+- FastAPI Article Crawler với newspaper4k
+- Telegram Backup integration
+- Smart caching system cho API
+- Random User Agent rotation
+- HTML documentation page
+- Bearer token authentication
+- Source monitoring capability
+
+**🛠️ Cải tiến:**
+- Hoàn toàn Vietnamese interface
+- Better error handling
+- Optimized backup script
+- Enhanced Docker configuration
+- Improved logging system
+
+**🐛 Bug Fixes:**
+- Fixed backup script workflow export
+- Resolved Docker permission issues
+- Fixed cron job scheduling
+- Improved domain validation
+
+### v1.5.0 (15/11/2024)
+**🔧 Bản cập nhật ổn định & hiệu suất**
+
+**✨ Tính năng mới:**
+- Auto-update system
+- Enhanced backup with compression
+- Swap management automation
+
+**🛠️ Cải tiến:**
+- Better resource management
+- Optimized Docker images
+- Enhanced error reporting
+
+## 🤝 Đóng Góp
+
+mình hoan nghênh các đóng góp! Vui lòng:
+
+1. Fork repository
+2. Tạo feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Tạo Pull Request
+
+## 📄 License
+
+Dự án này được phân phối dưới giấy phép MIT. Xem file `LICENSE` để biết thêm chi tiết.
+
+## 🙏 Credits
+
+- **N8N Team** - Workflow automation platform
+- **Newspaper4k** - Article extraction library
+- **FastAPI** - Modern web framework
+- **Caddy** - Automatic HTTPS server
+- **Docker** - Containerization platform
+
+### v1.4.1 (15/05/2025) - Bản cập nhật trước đây
+**✅ Cải tiến Hướng dẫn & Hoàn thiện Script:**
+- **Ưu tiên lệnh cài đặt nhanh** trong README
+- **Bổ sung hướng dẫn chi tiết** cách lấy Telegram Bot Token và Chat ID
+- **Thêm mục Miễn trừ trách nhiệm** vào README
+- Sửa các lỗi nhỏ về định dạng Markdown/HTML trong README
+- Cập nhật ngày phát hành cho phiên bản này
+
+**✅ Cải tiến Backup Lớn & Tích hợp Telegram (từ v1.4.0):**
+- Sửa lỗi logic và đường dẫn trong script backup (`backup-workflows.sh`) để đảm bảo sao lưu chính xác workflows, database (`database.sqlite`), và encryption key
+- File backup được nén dưới dạng `.tar.gz`
+- Tùy chọn cấu hình gửi thông báo trạng thái backup và file backup (nếu < 20MB) hàng ngày qua Telegram
+- Hướng dẫn chi tiết bằng tiếng Việt trong quá trình cài đặt để cấu hình Telegram
+- Cải thiện log chi tiết cho quá trình backup
+- Dọn dẹp các bản backup cũ an toàn hơn
+
+**🇻🇳 Việt hóa hoàn toàn (từ v1.4.0):** Tất cả các thông báo, câu hỏi trong script cài đặt đều bằng tiếng Việt
+
+**🛠️ Cải tiến Script Cài đặt (từ v1.4.0):**
+- Kiểm tra và cài đặt các gói phụ thuộc mạnh mẽ hơn
+- Cải thiện logic kiểm tra và cài đặt Docker & Docker Compose
+- Tối ưu hóa quyền truy cập thư mục cho N8N và script backup
+- Script cập nhật (`update-n8n.sh`) giờ đây sẽ tự động chạy backup trước khi cập nhật N8N
 
 ### v1.3.0 (26/03/2025)
 - ✅ Thêm tính năng tự động cấu hình swap
@@ -240,14 +363,44 @@ Nếu bạn thấy dự án này hữu ích, hãy xem xét hỗ trợ để phá
 - ✅ Cài đặt N8N cơ bản với Docker
 - 🔧 Cấu hình cơ bản và hướng dẫn
 
+## 💝 Ủng Hộ Dự Án
+
+> 🙏 **Chân thành cảm ơn mọi người đã theo dõi và ủng hộ mình!**
+>
+> Nếu bạn thấy script này hữu ích và muốn ủng hộ mình phát triển thêm nhiều công cụ automation khác, bạn có thể donate qua:
+
+### 💳 Các Phương Thức Donate:
+
+**🏦 Chuyển khoản ngân hàng:**
+- **Ngân hàng**: TP Bank
+- **Số tài khoản**: 08.8888.4749
+- **Chủ tài khoản**: Nguyễn Ngọc Thiện
+
+**🌍 PayPal (Quốc tế):**
+- **Email**: thien.home.less@gmail.com
+
+**📱 QR Code nhanh:**
+
+<div align="center">
+  <img src="https://github.com/KalvinThien/install-n8n-ffmpeg/blob/main/qrcode.png?raw=true" alt="QR Code Donate" width="400" />
+  <p><em>Quét mã QR để donate nhanh chóng</em></p>
+</div>
+
+> 💕 **Mỗi sự ủng hộ của bạn đều giúp mình có động lực để tạo ra nhiều content và công cụ hữu ích hơn cho cộng đồng!**
+
 ---
 
 <div align="center">
-  <p>
-    <sub>Script gốc được phát triển bởi Nguyễn Ngọc Thiện</sub><br />
-    <sub>© 2025 Nguyễn Ngọc Thiện - Mọi quyền được bảo lưu</sub>
-  </p>
+  <strong>🎬 Đừng quên đăng ký kênh YouTube để ủng hộ mình nhé!</strong><br>
+  <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1">
+    <img src="https://img.shields.io/badge/YouTube-Subscribe-red?style=for-the-badge&logo=youtube" alt="Subscribe to YouTube">
+  </a><br><br>
   
-  [![Made with Love](https://img.shields.io/badge/Made%20with-❤️-red.svg)](https://github.com/your-username)
-</div>
-
+  <strong>🌟 Tham gia cộng đồng N8N để nhận workflow templates miễn phí!</strong><br>
+  <a href="https://nas.io/n8n-workflow-idea">
+    <img src="https://img.shields.io/badge/Community-Join%20Now-brightgreen?style=for-the-badge&logo=discord" alt="Join Community">
+  </a><br><br>
+  
+  <strong>Được phát triển với ❤️ bởi Nguyễn Ngọc Thiện cho cộng đồng Việt Nam</strong><br>
+  <sub>Nếu dự án này hữu ích, hãy cho chúng tôi một ⭐ trên GitHub!</sub>
+</div> 
