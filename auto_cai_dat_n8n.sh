@@ -118,11 +118,24 @@ done
 check_domain() {
     local domain=$1
     local server_ip=$(curl -s https://api.ipify.org)
-    local domain_ip=$(dig +short $domain)
+    local domain_ip=$(dig +short $domain | head -1 | tr -d '[:space:]')
 
-    if [ "$domain_ip" = "$server_ip" ]; then
+    echo "🔍 Debug DNS check:"
+    echo "   Server IP: '$server_ip'"
+    echo "   Domain IP: '$domain_ip'"
+    echo "   All IPs: $(dig +short $domain | tr '\n' ' ')"
+
+    if [ -n "$domain_ip" ] && [ "$domain_ip" = "$server_ip" ]; then
         return 0  # Domain đã trỏ đúng
     else
+        # Kiểm tra xem có IP nào trong danh sách trùng với server IP không
+        local all_ips=$(dig +short $domain)
+        for ip in $all_ips; do
+            ip=$(echo "$ip" | tr -d '[:space:]')
+            if [ "$ip" = "$server_ip" ]; then
+                return 0  # Tìm thấy IP trùng khớp
+            fi
+        done
         return 1  # Domain chưa trỏ đúng
     fi
 }
@@ -198,7 +211,8 @@ setup_fastapi_crawler() {
         else
             echo "⚠️ API Domain $API_DOMAIN chưa được trỏ đến server này."
             echo "📍 Vui lòng tạo bản ghi DNS: $API_DOMAIN → $(curl -s https://api.ipify.org)"
-            echo "💡 Bạn có thể tiếp tục cài đặt và cấu hình DNS sau."
+            echo "💡 Script sẽ tiếp tục cài đặt. Bạn có thể cấu hình DNS sau."
+            echo "💡 SSL sẽ tự động hoạt động khi DNS được cập nhật đúng."
         fi
         
         read -p "Nhập mật khẩu Bearer token cho API: " FASTAPI_PASSWORD
@@ -1065,7 +1079,7 @@ if [ -z "\$N8N_CONTAINER" ]; then
     log "❌ Lỗi: Không tìm thấy container n8n đang chạy"
     send_telegram_message "❌ <b>Lỗi Backup</b>%0AKhông tìm thấy container N8N đang chạy"
     rm -rf "\$TEMP_DIR"
-    exit 1
+        exit 1
 fi
 
 log "✅ Tìm thấy container N8N: \$N8N_CONTAINER"
@@ -1422,6 +1436,86 @@ EOF
 
 chmod +x $N8N_DIR/check-ssl.sh
 
+# Tạo script debug DNS
+echo "Tạo script debug DNS..."
+cat << EOF > $N8N_DIR/debug-dns.sh
+#!/bin/bash
+
+echo "======================================================================"
+echo "                    DEBUG DNS CONFIGURATION"
+echo "======================================================================"
+
+# Lấy thông tin server
+SERVER_IP=\$(curl -s https://api.ipify.org)
+echo "🌐 Server IP: \$SERVER_IP"
+echo ""
+
+# Đọc domains từ .env
+if [ -f ".env" ]; then
+    source .env
+    echo "📋 Domains từ .env file:"
+    echo "   DOMAIN: \$DOMAIN"
+    echo "   API_DOMAIN: \$API_DOMAIN"
+    echo ""
+    
+    # Kiểm tra main domain
+    if [ -n "\$DOMAIN" ]; then
+        echo "🔍 Kiểm tra DNS cho \$DOMAIN:"
+        DOMAIN_IPS=\$(dig +short \$DOMAIN)
+        echo "   Tất cả IPs: \$DOMAIN_IPS"
+        
+        for ip in \$DOMAIN_IPS; do
+            ip=\$(echo "\$ip" | tr -d '[:space:]')
+            if [ "\$ip" = "\$SERVER_IP" ]; then
+                echo "   ✅ IP \$ip khớp với server"
+            else
+                echo "   ❌ IP \$ip KHÔNG khớp với server"
+            fi
+        done
+echo ""
+    fi
+    
+    # Kiểm tra API domain
+    if [ -n "\$API_DOMAIN" ]; then
+        echo "🔍 Kiểm tra DNS cho \$API_DOMAIN:"
+        API_IPS=\$(dig +short \$API_DOMAIN)
+        echo "   Tất cả IPs: \$API_IPS"
+        
+        for ip in \$API_IPS; do
+            ip=\$(echo "\$ip" | tr -d '[:space:]')
+            if [ "\$ip" = "\$SERVER_IP" ]; then
+                echo "   ✅ IP \$ip khớp với server"
+            else
+                echo "   ❌ IP \$ip KHÔNG khớp với server"
+            fi
+        done
+echo ""
+    fi
+else
+    echo "❌ Không tìm thấy file .env"
+fi
+
+echo "🧪 Test ping:"
+if [ -n "\$DOMAIN" ]; then
+    echo "   ping \$DOMAIN:"
+    ping -c 2 \$DOMAIN 2>/dev/null || echo "   ❌ Ping thất bại"
+fi
+
+if [ -n "\$API_DOMAIN" ]; then
+    echo "   ping \$API_DOMAIN:"
+    ping -c 2 \$API_DOMAIN 2>/dev/null || echo "   ❌ Ping thất bại"
+fi
+
+echo ""
+echo "💡 Hướng dẫn:"
+echo "   - Nếu ping thành công nhưng DNS check thất bại, có thể do DNS cache"
+echo "   - Thử: sudo systemctl flush-dns hoặc sudo systemctl restart systemd-resolved"
+echo "   - Hoặc đợi vài phút để DNS propagation hoàn tất"
+echo "======================================================================"
+EOF
+
+chmod +x $N8N_DIR/debug-dns.sh
+
 # Tạo cron job cho cập nhật tự động (hàng tuần)
 CRON_UPDATE="0 3 * * 0 $N8N_DIR/update-n8n.sh"
 if ! crontab -l 2>/dev/null | grep -q "$N8N_DIR/update-n8n.sh"; then
@@ -1484,9 +1578,7 @@ if [ -n "$INSTALL_ISSUES" ]; then
 echo ""
 fi
 
-echo "🔧 Hướng dẫn sử dụng chi tiết:"
-echo "   - Tài liệu N8N: https://docs.n8n.io"
-echo "   - Hỗ trợ: https://community.n8n.io"
+
 
 if [ "$SETUP_FASTAPI" = true ]; then
 echo ""
@@ -1505,6 +1597,7 @@ fi
 echo ""
 echo "🛠️ Debug và Troubleshooting:"
 echo "   - Kiểm tra SSL: $N8N_DIR/check-ssl.sh"
+echo "   - Debug DNS: $N8N_DIR/debug-dns.sh"
 echo "   - Xem logs: docker-compose logs -f"
 echo "   - Rebuild containers: docker-compose build --no-cache"
 echo "   - Restart all: docker-compose restart"
