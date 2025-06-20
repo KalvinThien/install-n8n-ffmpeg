@@ -18,6 +18,7 @@ TELEGRAM_CHAT_ID=""
 FASTAPI_PASSWORD=""
 SETUP_TELEGRAM=false
 SETUP_FASTAPI=false
+API_DOMAIN=""
 
 # Hàm thiết lập swap tự động
 setup_swap() {
@@ -186,8 +187,23 @@ setup_fastapi_crawler() {
         SETUP_FASTAPI=true
         echo ""
         echo "API này sẽ cho phép bạn crawl nội dung từ các trang web báo."
+        
+        # Hỏi về subdomain cho API
+        read -p "Nhập subdomain cho API (ví dụ: api.yourdomain.com): " API_DOMAIN
+        
+        # Kiểm tra API domain
+        echo "Kiểm tra API domain $API_DOMAIN..."
+        if check_domain $API_DOMAIN; then
+            echo "✅ API Domain $API_DOMAIN đã được trỏ đúng đến server này."
+        else
+            echo "⚠️ API Domain $API_DOMAIN chưa được trỏ đến server này."
+            echo "📍 Vui lòng tạo bản ghi DNS: $API_DOMAIN → $(curl -s https://api.ipify.org)"
+            echo "💡 Bạn có thể tiếp tục cài đặt và cấu hình DNS sau."
+        fi
+        
         read -p "Nhập mật khẩu Bearer token cho API: " FASTAPI_PASSWORD
-        echo "API sẽ được triển khai tại: https://${DOMAIN}/api"
+        echo "✅ API sẽ được triển khai tại: https://${API_DOMAIN}"
+        echo "📖 Documentation: https://${API_DOMAIN}/docs"
     else
         echo "Bỏ qua thiết lập FastAPI crawler."
     fi
@@ -216,13 +232,35 @@ fi
 # Kiểm tra các lệnh cần thiết
 check_commands
 
-# Nhận input domain và thiết lập cấu hình
-read -p "Nhập tên miền hoặc tên miền phụ của bạn: " DOMAIN
+# Nhận input domain và thiết lập cấu hình - UPDATED
+echo ""
+echo "======================================================================"
+echo "  CẤU HÌNH DOMAIN"
+echo "======================================================================"
+echo ""
+read -p "Nhập tên miền chính cho N8N (ví dụ: n8n.yourdomain.com): " DOMAIN
+
+# Kiểm tra domain chính
+echo "Kiểm tra domain $DOMAIN..."
+if check_domain $DOMAIN; then
+    echo "✅ Domain $DOMAIN đã được trỏ đúng đến server này."
+else
+    echo "❌ Domain $DOMAIN chưa được trỏ đến server này."
+    echo "📍 IP server hiện tại: $(curl -s https://api.ipify.org)"
+    echo "📍 IP domain đang trỏ: $(dig +short $DOMAIN | head -1)"
+    echo ""
+    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
+    read -p "Bạn có muốn tiếp tục cài đặt không? (y/n): " continue_install
+    if [[ ! $continue_install =~ ^[Yy]$ ]]; then
+        echo "Thoát cài đặt. Vui lòng cấu hình DNS và chạy lại script."
+        exit 1
+    fi
+fi
 
 # Thiết lập Telegram backup
 setup_telegram_backup
 
-# Thiết lập FastAPI crawler  
+# Thiết lập FastAPI crawler với subdomain
 setup_fastapi_crawler
 
 # Cài đặt FastAPI và dependencies nếu được yêu cầu
@@ -362,8 +400,8 @@ app = FastAPI(
     title="N8N Article Crawler API",
     description="API để crawl nội dung bài viết từ các trang web báo",
     version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc"
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Cấu hình bảo mật
@@ -472,7 +510,8 @@ def extract_article_content(url: str, language: str = "vi") -> ArticleResponse:
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """Trang chủ API"""
-    domain = os.getenv("DOMAIN", "localhost")
+    api_domain = os.getenv("API_DOMAIN", "api.localhost")
+    main_domain = os.getenv("DOMAIN", "localhost")
     html_content = f'''
     <!DOCTYPE html>
     <html lang="vi">
@@ -491,6 +530,8 @@ async def read_root():
             code {{ background: #e9ecef; padding: 2px 4px; border-radius: 3px; }}
             .auth-note {{ background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0; }}
             .example {{ background: #f8f9fa; padding: 15px; margin: 10px 0; border-radius: 5px; border: 1px solid #dee2e6; }}
+            .success {{ color: #28a745; }}
+            .warning {{ color: #ffc107; }}
         </style>
     </head>
     <body>
@@ -503,37 +544,47 @@ async def read_root():
             </div>
             
             <div class="endpoint">
-                <span class="method post">POST</span> <strong>/api/extract</strong><br>
+                <span class="method post">POST</span> <strong>/extract</strong><br>
                 Trích xuất nội dung từ một URL bài viết cụ thể.<br>
                 <div class="example">
                     <strong>Ví dụ request:</strong><br>
-                    <code>POST https://{domain}/api/extract</code><br>
+                    <code>POST https://{api_domain}/extract</code><br>
                     <code>Authorization: Bearer YOUR_TOKEN</code><br>
                     <code>{{"url": "https://example.com/article", "language": "vi"}}</code>
                 </div>
             </div>
             
             <div class="endpoint">
-                <span class="method post">POST</span> <strong>/api/monitor</strong><br>
+                <span class="method post">POST</span> <strong>/monitor</strong><br>
                 Thiết lập theo dõi tự động cho một nguồn tin (trang web).
             </div>
             
             <div class="endpoint">
-                <span class="method get">GET</span> <strong>/api/sources</strong><br>
+                <span class="method get">GET</span> <strong>/sources</strong><br>
                 Liệt kê tất cả nguồn tin đang được theo dõi.
             </div>
             
             <div class="endpoint">
-                <span class="method get">GET</span> <strong>/api/docs</strong><br>
+                <span class="method get">GET</span> <strong>/health</strong><br>
+                Kiểm tra sức khỏe API.
+            </div>
+            
+            <div class="endpoint">
+                <span class="method get">GET</span> <strong>/docs</strong><br>
                 Tài liệu API chi tiết với giao diện Swagger.
             </div>
             
             <h3>📋 Cách sử dụng với N8N:</h3>
             <p>1. Tạo HTTP Request node trong N8N</p>
-            <p>2. Đặt URL: <code>https://{domain}/api/extract</code></p>
+            <p>2. Đặt URL: <code>https://{api_domain}/extract</code></p>
             <p>3. Method: POST</p>
             <p>4. Headers: <code>Authorization: Bearer YOUR_TOKEN</code></p>
             <p>5. Body: <code>{{"url": "https://example.com/article"}}</code></p>
+            
+            <h3>🔗 Liên kết hữu ích:</h3>
+            <p>🌐 <a href="https://{main_domain}">N8N Dashboard</a></p>
+            <p>📖 <a href="/docs">API Documentation</a></p>
+            <p>❤️ <a href="/health">API Health Check</a></p>
             
             <h3>🔄 Response Format:</h3>
             <div class="example">
@@ -553,7 +604,7 @@ async def read_root():
     '''
     return html_content
 
-@app.post("/api/extract", response_model=ArticleResponse)
+@app.post("/extract", response_model=ArticleResponse)
 async def extract_article(
     request: ArticleRequest,
     token: str = Depends(verify_token)
@@ -581,7 +632,7 @@ async def extract_article(
     
     return result
 
-@app.post("/api/monitor")
+@app.post("/monitor")
 async def setup_monitoring(
     request: UrlMonitorRequest,
     token: str = Depends(verify_token)
@@ -618,7 +669,7 @@ async def setup_monitoring(
             detail=f"Không thể thiết lập theo dõi: {str(e)}"
         )
 
-@app.get("/api/sources")
+@app.get("/sources")
 async def get_monitored_sources(token: str = Depends(verify_token)) -> Dict:
     """Lấy danh sách nguồn tin đang theo dõi"""
     return {
@@ -632,7 +683,7 @@ async def get_monitored_sources(token: str = Depends(verify_token)) -> Dict:
         } for url, data in monitored_sources.items()}
     }
 
-@app.get("/api/health")
+@app.get("/health")
 async def health_check():
     """Kiểm tra sức khỏe API"""
     return {
@@ -651,6 +702,7 @@ EOF
 #!/bin/bash
 export FASTAPI_PASSWORD="$FASTAPI_PASSWORD"
 export DOMAIN="$DOMAIN"
+export API_DOMAIN="$API_DOMAIN"
 cd /app/fastapi
 /opt/fastapi-venv/bin/uvicorn main:app --host 0.0.0.0 --port 8001 --reload
 EOF
@@ -719,7 +771,7 @@ EOF
 # Tạo docker-compose.yml
 echo "Tạo docker-compose.yml..."
 if [ "$SETUP_FASTAPI" = true ]; then
-    cat << EOF > $N8N_DIR/docker-compose.yml
+cat << EOF > $N8N_DIR/docker-compose.yml
 version: '3.8'
 
 services:
@@ -756,6 +808,7 @@ services:
     environment:
       - FASTAPI_PASSWORD=\${FASTAPI_PASSWORD}
       - DOMAIN=\${DOMAIN}
+      - API_DOMAIN=\${API_DOMAIN}
     volumes:
       - ./fastapi:/app/fastapi
       - /opt/fastapi-venv:/opt/fastapi-venv
@@ -845,15 +898,16 @@ fi
 echo "Tạo file .env..."
 cat << EOF > $N8N_DIR/.env
 DOMAIN=$DOMAIN
+API_DOMAIN=$API_DOMAIN
 FASTAPI_PASSWORD=$FASTAPI_PASSWORD
 EOF
 
 # Tạo Caddyfile
 echo "Tạo Caddyfile cho SSL tự động..."
 if [ "$SETUP_FASTAPI" = true ]; then
-    cat << EOF > $N8N_DIR/Caddyfile
+cat << EOF > $N8N_DIR/Caddyfile
+# N8N Main Domain
 $DOMAIN {
-    reverse_proxy /api/* fastapi:8001
     reverse_proxy n8n:5678
     
     # Cấu hình headers bảo mật
@@ -874,7 +928,39 @@ $DOMAIN {
     
     # Log
     log {
-        output file /var/log/caddy/access.log
+        output file /var/log/caddy/n8n-access.log
+        format console
+    }
+}
+
+# FastAPI Subdomain
+$API_DOMAIN {
+    reverse_proxy fastapi:8001
+    
+    # Cấu hình headers bảo mật
+    header {
+        # Bảo mật
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        
+        # CORS cho API
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        Access-Control-Allow-Headers "Content-Type, Authorization"
+        
+        # Loại bỏ thông tin server
+        -Server
+    }
+    
+    # Cấu hình gzip
+    encode gzip
+    
+    # Log
+    log {
+        output file /var/log/caddy/api-access.log
         format console
     }
 }
@@ -1172,7 +1258,7 @@ else
     log "Không tìm thấy cài đặt yt-dlp đã biết"
 fi
 
-# Lấy phiên bản hiện tại  
+# Lấy phiên bản hiện tại
 CURRENT_IMAGE_ID=\$(docker images -q n8n-ffmpeg-latest)
 if [ -z "\$CURRENT_IMAGE_ID" ]; then
     log "Không tìm thấy image n8n-ffmpeg-latest"
@@ -1214,6 +1300,88 @@ EOF
 
 chmod +x $N8N_DIR/update-n8n.sh
 
+# Tạo script kiểm tra SSL
+echo "Tạo script kiểm tra SSL..."
+cat << EOF > $N8N_DIR/check-ssl.sh
+#!/bin/bash
+
+echo "======================================================================"
+echo "                    KIỂM TRA SSL VÀ DOMAIN"
+echo "======================================================================"
+
+# Kiểm tra DNS
+echo "🔍 Kiểm tra DNS cho domain chính..."
+MAIN_IP=\$(dig +short $DOMAIN | head -1)
+SERVER_IP=\$(curl -s https://api.ipify.org)
+
+echo "📍 IP Server: \$SERVER_IP"
+echo "📍 IP Domain $DOMAIN: \$MAIN_IP"
+
+if [ "\$MAIN_IP" = "\$SERVER_IP" ]; then
+    echo "✅ Domain $DOMAIN đã trỏ đúng"
+else
+    echo "❌ Domain $DOMAIN chưa trỏ đúng"
+fi
+
+# Kiểm tra API domain nếu có
+if [ "$SETUP_FASTAPI" = true ]; then
+    echo ""
+    echo "🔍 Kiểm tra DNS cho API domain..."
+    API_IP=\$(dig +short $API_DOMAIN | head -1)
+    echo "📍 IP API Domain $API_DOMAIN: \$API_IP"
+    
+    if [ "\$API_IP" = "\$SERVER_IP" ]; then
+        echo "✅ API Domain $API_DOMAIN đã trỏ đúng"
+    else
+        echo "❌ API Domain $API_DOMAIN chưa trỏ đúng"
+    fi
+fi
+
+echo ""
+echo "🐳 Kiểm tra containers..."
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+echo ""
+echo "📋 Kiểm tra logs containers..."
+echo "--- Caddy Logs (10 dòng cuối) ---"
+docker logs caddy --tail 10
+
+if [ "$SETUP_FASTAPI" = true ]; then
+    echo ""
+    echo "--- FastAPI Logs (10 dòng cuối) ---"
+    docker logs fastapi-crawler --tail 10
+fi
+
+echo ""
+echo "--- N8N Logs (10 dòng cuối) ---"
+docker logs n8n --tail 10
+
+echo ""
+echo "🌐 Kiểm tra kết nối..."
+echo "Test HTTP $DOMAIN:"
+curl -I -s --connect-timeout 5 http://$DOMAIN || echo "❌ HTTP không kết nối được"
+
+echo ""
+echo "Test HTTPS $DOMAIN:"
+curl -I -s --connect-timeout 5 https://$DOMAIN || echo "❌ HTTPS không kết nối được"
+
+if [ "$SETUP_FASTAPI" = true ]; then
+    echo ""
+    echo "Test API $API_DOMAIN:"
+    curl -I -s --connect-timeout 5 https://$API_DOMAIN || echo "❌ API không kết nối được"
+fi
+
+echo ""
+echo "🔧 Hướng dẫn debug:"
+echo "1. Nếu DNS chưa đúng: Cập nhật bản ghi A record"
+echo "2. Nếu container không chạy: docker-compose restart"
+echo "3. Nếu SSL lỗi: Đợi 2-5 phút để Let's Encrypt cấp cert"
+echo "4. Xem logs chi tiết: docker-compose logs -f caddy"
+echo "======================================================================"
+EOF
+
+chmod +x $N8N_DIR/check-ssl.sh
+
 # Tạo cron job cho cập nhật tự động (hàng tuần)
 CRON_UPDATE="0 3 * * 0 $N8N_DIR/update-n8n.sh"
 if ! crontab -l 2>/dev/null | grep -q "$N8N_DIR/update-n8n.sh"; then
@@ -1224,6 +1392,12 @@ fi
 # Tạo lần backup đầu tiên để kiểm tra
 echo "Tạo backup đầu tiên để kiểm tra..."
 $N8N_DIR/backup-workflows.sh
+
+# Chạy script kiểm tra SSL sau khi khởi động
+echo ""
+echo "🔍 Chạy kiểm tra SSL và domain..."
+sleep 5
+$N8N_DIR/check-ssl.sh
 
 # Hiển thị thông tin hoàn thành
 echo ""
@@ -1244,8 +1418,9 @@ fi
 
 if [ "$SETUP_FASTAPI" = true ]; then
     echo "✅ FastAPI Article Crawler đã được thiết lập"
-    echo "   → API docs: https://$DOMAIN/api/docs"
-    echo "   → API endpoint: https://$DOMAIN/api/extract"
+    echo "   → API domain: https://$API_DOMAIN"
+    echo "   → API docs: https://$API_DOMAIN/docs"
+    echo "   → API endpoint: https://$API_DOMAIN/extract"
 fi
 
 echo ""
@@ -1266,7 +1441,7 @@ echo ""
 if [ -n "$INSTALL_ISSUES" ]; then
     echo "⚠️ Các vấn đề đã ghi nhận:"
     echo -e "$INSTALL_ISSUES"
-    echo ""
+echo ""
 fi
 
 echo "🔧 Hướng dẫn sử dụng chi tiết:"
@@ -1274,13 +1449,17 @@ echo "   - Tài liệu N8N: https://docs.n8n.io"
 echo "   - Hỗ trợ: https://community.n8n.io"
 
 if [ "$SETUP_FASTAPI" = true ]; then
-    echo ""
+echo ""
     echo "📖 Hướng dẫn sử dụng FastAPI Crawler với N8N:"
     echo "   1. Tạo HTTP Request node"
-    echo "   2. URL: https://$DOMAIN/api/extract"
+    echo "   2. URL: https://$API_DOMAIN/extract"
     echo "   3. Method: POST"
     echo "   4. Headers: Authorization: Bearer $FASTAPI_PASSWORD"
     echo "   5. Body: {\"url\": \"https://example.com/article\"}"
+    echo ""
+    echo "🔗 Kiểm tra API:"
+    echo "   - Health check: curl https://$API_DOMAIN/health"
+    echo "   - API docs: https://$API_DOMAIN/docs"
 fi
 
 echo ""
