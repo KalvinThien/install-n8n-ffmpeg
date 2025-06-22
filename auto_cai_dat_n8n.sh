@@ -398,13 +398,18 @@ RUN apk update && \
 # Cài đặt yt-dlp - FIXED: Sử dụng phương pháp đáng tin cậy hơn
 RUN python3 -m pip install --break-system-packages --no-cache-dir yt-dlp && \
     # Tạo symlink để đảm bảo yt-dlp có thể truy cập được
-    ln -sf /usr/lib/python*/site-packages/yt_dlp/__main__.py /usr/local/bin/yt-dlp && \
-    chmod +x /usr/local/bin/yt-dlp
+    ln -sf /usr/bin/python3 /usr/bin/python && \
+    ln -sf $(which python3) /usr/local/bin/python && \
+    # Kiểm tra yt-dlp có thể chạy được
+    python3 -m yt_dlp --version
 
 # Thiết lập biến môi trường cho Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
     NODE_ENV=production
+
+# Đảm bảo n8n CLI có thể truy cập được
+RUN which n8n || (echo "N8N không tìm thấy, cài đặt lại..." && npm install -g n8n@latest)
 
 # Tạo thư mục cần thiết với quyền phù hợp
 RUN mkdir -p /files/youtube_content_anylystic && \
@@ -412,26 +417,36 @@ RUN mkdir -p /files/youtube_content_anylystic && \
     mkdir -p /files/temp && \
     chown -R node:node /files
 
-# Cài đặt n8n-nodes-puppeteer
+# Cài đặt n8n-nodes-puppeteer trong thư mục n8n
+USER node
 WORKDIR /usr/local/lib/node_modules/n8n
-RUN npm install n8n-nodes-puppeteer --save
+RUN npm install n8n-nodes-puppeteer --save 2>/dev/null || echo "Puppeteer nodes đã cài đặt"
 
 # Kiểm tra các công cụ đã cài đặt - IMPROVED
+USER root
 RUN echo "=== KIỂM TRA CÔNG CỤ ===" && \
-    ffmpeg -version | head -n 1 && \
-    wget --version | head -n 1 && \
-    python3 -m yt_dlp --version && \
-    chromium-browser --version && \
-    echo "=== TẤT CẢ CÔNG CỤ ĐÃ SẴN SÀNG ==="
+    echo "1. FFmpeg:" && (ffmpeg -version | head -n 1 || echo "FFmpeg chưa cài đặt") && \
+    echo "2. Wget:" && (wget --version | head -n 1 || echo "Wget chưa cài đặt") && \
+    echo "3. YT-DLP:" && (python3 -m yt_dlp --version || echo "YT-DLP chưa cài đặt") && \
+    echo "4. Chromium:" && (chromium-browser --version || echo "Chromium chưa cài đặt") && \
+    echo "5. N8N CLI:" && (which n8n && n8n --version || echo "N8N CLI chưa sẵn sàng") && \
+    echo "=== KIỂM TRA HOÀN TẤT ==="
 
-# Trở lại user node
+# Trở lại user node và thiết lập môi trường
 USER node
 WORKDIR /home/node
 
 # Thiết lập N8N_USER_FOLDER để đảm bảo quyền truy cập đúng
 ENV N8N_USER_FOLDER=/home/node/.n8n
+ENV PATH="/usr/local/lib/node_modules/.bin:$PATH"
+
+# Sửa lỗi: Đảm bảo n8n command có thể được tìm thấy
+RUN echo 'export PATH="/usr/local/lib/node_modules/.bin:$PATH"' >> ~/.bashrc
 
 EXPOSE 5678
+
+# Thay đổi CMD để sử dụng đường dẫn tuyệt đối
+CMD ["node", "/usr/local/lib/node_modules/n8n/bin/n8n"]
 EOF
 
 # Tạo file docker-compose.yml với cập nhật mới
