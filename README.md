@@ -47,8 +47,8 @@ curl -fsSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs
 ### Hoặc Tải Về và Chạy
 ```bash
 wget https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh
-chmod +x n8n_install_auto.sh
-sudo ./n8n_install_auto.sh
+chmod +x auto_cai_dat_n8n.sh
+sudo ./auto_cai_dat_n8n.sh
 ```
 
 ---
@@ -58,22 +58,22 @@ sudo ./n8n_install_auto.sh
 ### Tham Số Dòng Lệnh
 ```bash
 # Hiển thị trợ giúp
-sudo ./n8n_install_auto.sh --help
+sudo ./auto_cai_dat_n8n.sh --help
 
 # Chỉ định thư mục cài đặt
-sudo ./n8n_install_auto.sh --dir /opt/n8n
+sudo ./auto_cai_dat_n8n.sh --dir /opt/n8n
 
 # Bỏ qua cài đặt Docker (nếu đã có)
-sudo ./n8n_install_auto.sh --skip-docker
+sudo ./auto_cai_dat_n8n.sh --skip-docker
 
 # Kích hoạt Telegram backup
-sudo ./n8n_install_auto_improved.sh --enable-telegram
+sudo ./auto_cai_dat_n8n.sh --enable-telegram
 
 # Kích hoạt FastAPI
-sudo ./n8n_install_auto.sh --enable-fastapi
+sudo ./auto_cai_dat_n8n.sh --enable-fastapi
 
 # Kết hợp nhiều tùy chọn
-sudo ./n8n_install_auto.sh --dir /opt/n8n --enable-telegram --enable-fastapi
+sudo ./auto_cai_dat_n8n.sh --dir /opt/n8n --enable-telegram --enable-fastapi
 ```
 
 ---
