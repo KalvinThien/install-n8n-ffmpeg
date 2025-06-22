@@ -486,7 +486,8 @@ cat << 'EOF' > $N8N_DIR/backup-workflows.sh
 # YouTube: https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1
 # =============================================================================
 
-# Thiết lập biến
+# Thiết lập biến - SỬA LỖI: Thêm N8N_DIR mặc định
+N8N_DIR="${N8N_DIR:-/home/n8n}"
 BACKUP_DIR="$N8N_DIR/files/backup_full"
 DATE=$(date +"%Y%m%d_%H%M%S")
 BACKUP_FILE="$BACKUP_DIR/n8n_backup_$DATE.tar.gz"
@@ -564,11 +565,26 @@ send_telegram_notification "🚀 <b>Bắt đầu backup N8N</b>%0A⏰ Thời gia
 # Thiết lập thư mục
 setup_backup_directories
 
-# Tìm container n8n
+# Tìm container n8n - CẢI TIẾN: Tìm theo nhiều cách
+N8N_CONTAINER=""
+
+# Cách 1: Tìm theo tên container
 N8N_CONTAINER=$(docker ps -q --filter "name=n8n" 2>/dev/null | head -n 1)
+
+# Cách 2: Nếu không tìm thấy, tìm theo image
+if [ -z "$N8N_CONTAINER" ]; then
+    N8N_CONTAINER=$(docker ps -q --filter "ancestor=n8n-ffmpeg-latest" 2>/dev/null | head -n 1)
+fi
+
+# Cách 3: Nếu vẫn không tìm thấy, tìm theo label
+if [ -z "$N8N_CONTAINER" ]; then
+    N8N_CONTAINER=$(docker ps -q --filter "label=com.docker.compose.service=n8n" 2>/dev/null | head -n 1)
+fi
 
 if [ -z "$N8N_CONTAINER" ]; then
     log "❌ Không tìm thấy container n8n đang chạy"
+    log "🔍 Danh sách containers đang chạy:"
+    docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | log
     send_telegram_notification "❌ <b>Lỗi Backup N8N</b>%0A🔍 Không tìm thấy container n8n đang chạy"
     rm -rf "$TEMP_DIR"
     exit 1
@@ -576,53 +592,76 @@ fi
 
 log "✅ Tìm thấy container n8n: $N8N_CONTAINER"
 
-# Xuất tất cả workflows
+# Kiểm tra n8n CLI có sẵn trong container không
+if ! docker exec $N8N_CONTAINER which n8n >/dev/null 2>&1; then
+    log "❌ N8N CLI không khả dụng trong container"
+    send_telegram_notification "❌ <b>Lỗi Backup N8N</b>%0A🔧 N8N CLI không khả dụng"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+# Xuất tất cả workflows với error handling tốt hơn
 log "📋 Đang xuất danh sách workflows..."
 WORKFLOWS_JSON=$(docker exec $N8N_CONTAINER n8n list:workflows --json 2>/dev/null)
 
-if [ $? -eq 0 ] && [ -n "$WORKFLOWS_JSON" ]; then
-    # Đếm số lượng workflows
-    WORKFLOW_COUNT=$(echo "$WORKFLOWS_JSON" | jq '. | length' 2>/dev/null || echo "0")
-    log "💼 Tìm thấy $WORKFLOW_COUNT workflows"
-    
-    if [ "$WORKFLOW_COUNT" -gt 0 ]; then
-        # Xuất từng workflow riêng lẻ
-        echo "$WORKFLOWS_JSON" | jq -c '.[]' 2>/dev/null | while read -r workflow; do
-            id=$(echo "$workflow" | jq -r '.id' 2>/dev/null)
-            name=$(echo "$workflow" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')
-            
-            if [ -n "$id" ] && [ "$id" != "null" ]; then
-                log "📄 Đang xuất workflow: $name (ID: $id)"
-                docker exec $N8N_CONTAINER n8n export:workflow --id="$id" --output="/tmp/workflow_$id.json" 2>/dev/null
-                
-                if [ $? -eq 0 ]; then
-                    docker cp "$N8N_CONTAINER:/tmp/workflow_$id.json" "$TEMP_DIR/workflows/$id-$name.json" 2>/dev/null
-                    docker exec $N8N_CONTAINER rm -f "/tmp/workflow_$id.json" 2>/dev/null
-                else
-                    log "⚠️ Không thể xuất workflow: $name (ID: $id)"
-                fi
-            fi
-        done
+if [ $? -eq 0 ] && [ -n "$WORKFLOWS_JSON" ] && [ "$WORKFLOWS_JSON" != "null" ]; then
+    # Kiểm tra JSON hợp lệ
+    if echo "$WORKFLOWS_JSON" | jq empty 2>/dev/null; then
+        # Đếm số lượng workflows
+        WORKFLOW_COUNT=$(echo "$WORKFLOWS_JSON" | jq '. | length' 2>/dev/null || echo "0")
+        log "💼 Tìm thấy $WORKFLOW_COUNT workflows"
         
-        # Xuất tất cả workflows vào một file duy nhất
-        log "📦 Đang xuất tất cả workflows vào file tổng hợp..."
-        docker exec $N8N_CONTAINER n8n export:workflow --all --output="/tmp/all_workflows.json" 2>/dev/null
-        if [ $? -eq 0 ]; then
-            docker cp "$N8N_CONTAINER:/tmp/all_workflows.json" "$TEMP_DIR/workflows/all_workflows.json" 2>/dev/null
-            docker exec $N8N_CONTAINER rm -f "/tmp/all_workflows.json" 2>/dev/null
+        if [ "$WORKFLOW_COUNT" -gt 0 ]; then
+            # Xuất từng workflow riêng lẻ với error handling
+            echo "$WORKFLOWS_JSON" | jq -c '.[]' 2>/dev/null | while read -r workflow; do
+                id=$(echo "$workflow" | jq -r '.id' 2>/dev/null)
+                name=$(echo "$workflow" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')
+                
+                if [ -n "$id" ] && [ "$id" != "null" ]; then
+                    log "📄 Đang xuất workflow: $name (ID: $id)"
+                    
+                    # Thử xuất workflow với timeout
+                    timeout 30 docker exec $N8N_CONTAINER n8n export:workflow --id="$id" --output="/tmp/workflow_$id.json" 2>/dev/null
+                    
+                    if [ $? -eq 0 ] && docker exec $N8N_CONTAINER test -f "/tmp/workflow_$id.json" 2>/dev/null; then
+                        docker cp "$N8N_CONTAINER:/tmp/workflow_$id.json" "$TEMP_DIR/workflows/$id-$name.json" 2>/dev/null
+                        if [ $? -eq 0 ]; then
+                            log "✅ Đã xuất workflow: $name"
+                        else
+                            log "⚠️ Không thể copy workflow: $name"
+                        fi
+                        docker exec $N8N_CONTAINER rm -f "/tmp/workflow_$id.json" 2>/dev/null
+                    else
+                        log "⚠️ Không thể xuất workflow: $name (ID: $id)"
+                    fi
+                fi
+            done
+            
+            # Xuất tất cả workflows vào một file duy nhất
+            log "📦 Đang xuất tất cả workflows vào file tổng hợp..."
+            timeout 60 docker exec $N8N_CONTAINER n8n export:workflow --all --output="/tmp/all_workflows.json" 2>/dev/null
+            if [ $? -eq 0 ] && docker exec $N8N_CONTAINER test -f "/tmp/all_workflows.json" 2>/dev/null; then
+                docker cp "$N8N_CONTAINER:/tmp/all_workflows.json" "$TEMP_DIR/workflows/all_workflows.json" 2>/dev/null
+                if [ $? -eq 0 ]; then
+                    log "✅ Đã xuất file workflows tổng hợp"
+                fi
+                docker exec $N8N_CONTAINER rm -f "/tmp/all_workflows.json" 2>/dev/null
+            fi
+        else
+            log "⚠️ Không tìm thấy workflow nào để sao lưu"
         fi
     else
-        log "⚠️ Không tìm thấy workflow nào để sao lưu"
+        log "⚠️ Dữ liệu workflows không hợp lệ"
     fi
 else
     log "⚠️ Không thể lấy danh sách workflows hoặc không có workflows nào"
 fi
 
-# Sao lưu credentials (database và encryption key)
+# Sao lưu credentials (database và encryption key) với error handling tốt hơn
 log "🔐 Đang sao lưu credentials và cấu hình..."
 
 # Sao lưu database
-if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/database.sqlite"; then
+if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/database.sqlite" 2>/dev/null; then
     docker cp "$N8N_CONTAINER:/home/node/.n8n/database.sqlite" "$TEMP_DIR/credentials/" 2>/dev/null
     if [ $? -eq 0 ]; then
         log "✅ Đã sao lưu database.sqlite"
@@ -634,48 +673,82 @@ else
 fi
 
 # Sao lưu encryption key
-if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/config"; then
+if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/config" 2>/dev/null; then
     docker cp "$N8N_CONTAINER:/home/node/.n8n/config" "$TEMP_DIR/credentials/" 2>/dev/null
-    log "✅ Đã sao lưu file config"
+    if [ $? -eq 0 ]; then
+        log "✅ Đã sao lưu file config"
+    fi
 fi
 
 # Sao lưu các file cấu hình khác
 for config_file in "encryptionKey" "settings.json" "config.json"; do
-    if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/$config_file"; then
+    if docker exec $N8N_CONTAINER test -f "/home/node/.n8n/$config_file" 2>/dev/null; then
         docker cp "$N8N_CONTAINER:/home/node/.n8n/$config_file" "$TEMP_DIR/credentials/" 2>/dev/null
         if [ $? -eq 0 ]; then
             log "✅ Đã sao lưu $config_file"
+        else
+            log "⚠️ Không thể sao lưu $config_file"
         fi
     fi
 done
 
-# Tạo file thông tin backup
+# Sao lưu thêm các file quan trọng khác
+log "📁 Đang sao lưu các file cấu hình thêm..."
+
+# Sao lưu toàn bộ thư mục .n8n (trừ logs và cache)
+docker exec $N8N_CONTAINER tar -czf "/tmp/n8n_config_full.tar.gz" \
+    --exclude="logs" --exclude="cache" --exclude="temp" \
+    -C "/home/node" ".n8n" 2>/dev/null
+
+if [ $? -eq 0 ]; then
+    docker cp "$N8N_CONTAINER:/tmp/n8n_config_full.tar.gz" "$TEMP_DIR/credentials/" 2>/dev/null
+    if [ $? -eq 0 ]; then
+        log "✅ Đã sao lưu toàn bộ cấu hình N8N"
+    fi
+    docker exec $N8N_CONTAINER rm -f "/tmp/n8n_config_full.tar.gz" 2>/dev/null
+fi
+
+# Tạo file thông tin backup chi tiết
 cat << INFO > "$TEMP_DIR/backup_info.txt"
 N8N Backup Information
 ======================
 Backup Date: $(date)
 N8N Container: $N8N_CONTAINER
-Backup Version: 2.0
+Backup Version: 2.1
 Created By: Nguyễn Ngọc Thiện
 YouTube Channel: https://www.youtube.com/@kalvinthiensocial
+Support: 08.8888.4749
 
 Backup Contents:
-- Workflows: $(find "$TEMP_DIR/workflows" -name "*.json" | wc -l) files
+- Workflows: $(find "$TEMP_DIR/workflows" -name "*.json" 2>/dev/null | wc -l) files
 - Database: $([ -f "$TEMP_DIR/credentials/database.sqlite" ] && echo "✅ Included" || echo "❌ Missing")
 - Encryption Key: $([ -f "$TEMP_DIR/credentials/encryptionKey" ] && echo "✅ Included" || echo "❌ Missing")
-- Config Files: $(find "$TEMP_DIR/credentials" -name "*.json" | wc -l) files
+- Config Files: $(find "$TEMP_DIR/credentials" -name "*.json" 2>/dev/null | wc -l) files
+- Full Config Archive: $([ -f "$TEMP_DIR/credentials/n8n_config_full.tar.gz" ] && echo "✅ Included" || echo "❌ Missing")
+
+System Information:
+- Server: $(hostname)
+- N8N Directory: $N8N_DIR
+- Backup Directory: $BACKUP_DIR
+- Docker Version: $(docker --version 2>/dev/null || echo "Unknown")
 
 Restore Instructions:
-1. Stop N8N container
-2. Extract this backup
+1. Stop N8N container: docker-compose down
+2. Extract this backup to temporary directory
 3. Copy database.sqlite and encryptionKey to .n8n directory
-4. Import workflows using n8n import:workflow command
-5. Restart N8N container
+4. Import workflows using: n8n import:workflow --input=/path/to/workflows/
+5. Restart N8N container: docker-compose up -d
+
+Advanced Restore (Full Config):
+1. Stop N8N container
+2. Backup current .n8n directory
+3. Extract n8n_config_full.tar.gz to /home/node/.n8n
+4. Restart container
 
 For support: 08.8888.4749
 INFO
 
-# Tạo file tar.gz nén
+# Tạo file tar.gz nén với compression tốt hơn
 log "📦 Đang tạo file backup nén: $BACKUP_FILE"
 tar -czf "$BACKUP_FILE" -C "$(dirname "$TEMP_DIR")" "$(basename "$TEMP_DIR")" 2>/dev/null
 
@@ -684,7 +757,8 @@ if [ $? -eq 0 ] && [ -f "$BACKUP_FILE" ]; then
     log "✅ Đã tạo file backup: $BACKUP_FILE ($BACKUP_SIZE)"
     
     # Gửi thông báo thành công qua Telegram
-    send_telegram_notification "✅ <b>Backup N8N hoàn tất!</b>%0A📦 File: $(basename "$BACKUP_FILE")%0A📊 Kích thước: $BACKUP_SIZE%0A⏰ Thời gian: $(date '+%d/%m/%Y %H:%M:%S')" "$BACKUP_FILE"
+    WORKFLOW_FILES=$(find "$TEMP_DIR/workflows" -name "*.json" 2>/dev/null | wc -l)
+    send_telegram_notification "✅ <b>Backup N8N hoàn tất!</b>%0A📦 File: $(basename "$BACKUP_FILE")%0A📊 Kích thước: $BACKUP_SIZE%0A💼 Workflows: $WORKFLOW_FILES files%0A⏰ Thời gian: $(date '+%d/%m/%Y %H:%M:%S')" "$BACKUP_FILE"
 else
     log "❌ Không thể tạo file backup"
     send_telegram_notification "❌ <b>Lỗi tạo file backup N8N</b>%0A⏰ Thời gian: $(date '+%d/%m/%Y %H:%M:%S')"
@@ -694,23 +768,45 @@ fi
 log "🧹 Dọn dẹp thư mục tạm thời..."
 rm -rf "$TEMP_DIR"
 
-# Giữ lại tối đa 30 bản sao lưu gần nhất
-log "🗂️ Giữ lại 30 bản sao lưu gần nhất..."
-OLD_BACKUPS=$(find "$BACKUP_DIR" -name "n8n_backup_*.tar.gz" -type f | sort -r | tail -n +31)
-if [ -n "$OLD_BACKUPS" ]; then
-    echo "$OLD_BACKUPS" | xargs rm -f
-    DELETED_COUNT=$(echo "$OLD_BACKUPS" | wc -l)
-    log "🗑️ Đã xóa $DELETED_COUNT bản backup cũ"
+# Giữ lại tối đa 30 bản sao lưu gần nhất (cải tiến)
+log "🗂️ Quản lý backup cũ - giữ lại 30 bản gần nhất..."
+if [ -d "$BACKUP_DIR" ]; then
+    OLD_BACKUPS=$(find "$BACKUP_DIR" -name "n8n_backup_*.tar.gz" -type f -print0 | sort -z -r | tail -z -n +31 | tr '\0' '\n')
+    if [ -n "$OLD_BACKUPS" ]; then
+        DELETED_COUNT=$(echo "$OLD_BACKUPS" | wc -l)
+        echo "$OLD_BACKUPS" | xargs rm -f 2>/dev/null
+        log "🗑️ Đã xóa $DELETED_COUNT bản backup cũ"
+    fi
 fi
 
 # Thống kê tổng quan
-TOTAL_BACKUPS=$(find "$BACKUP_DIR" -name "n8n_backup_*.tar.gz" -type f | wc -l)
-TOTAL_SIZE=$(du -sh "$BACKUP_DIR" | cut -f1)
+TOTAL_BACKUPS=$(find "$BACKUP_DIR" -name "n8n_backup_*.tar.gz" -type f 2>/dev/null | wc -l)
+TOTAL_SIZE=$(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1)
 
 log "📊 === THỐNG KÊ BACKUP ==="
 log "📁 Tổng số backup: $TOTAL_BACKUPS"
-log "💾 Tổng dung lượng: $TOTAL_SIZE"
-log "✅ Sao lưu hoàn tất: $BACKUP_FILE"
+log "💾 Tổng dung lượng thư mục: $TOTAL_SIZE"
+log "✅ Backup mới nhất: $BACKUP_FILE"
+
+# Kiểm tra sức khỏe backup
+log "🔍 === KIỂM TRA SỨC KHỎE BACKUP ==="
+if [ -f "$BACKUP_FILE" ]; then
+    # Kiểm tra file backup có thể đọc được không
+    if tar -tzf "$BACKUP_FILE" >/dev/null 2>&1; then
+        log "✅ File backup có thể đọc được"
+    else
+        log "❌ File backup bị lỗi hoặc không thể đọc"
+        send_telegram_notification "❌ <b>Cảnh báo backup N8N</b>%0A🔧 File backup bị lỗi"
+    fi
+    
+    # Kiểm tra kích thước file
+    BACKUP_SIZE_BYTES=$(stat -f%z "$BACKUP_FILE" 2>/dev/null || stat -c%s "$BACKUP_FILE" 2>/dev/null)
+    if [ "$BACKUP_SIZE_BYTES" -gt 1024 ]; then
+        log "✅ Kích thước backup hợp lý ($BACKUP_SIZE)"
+    else
+        log "⚠️ File backup quá nhỏ - có thể thiếu dữ liệu"
+    fi
+fi
 
 echo ""
 echo "🎉 Backup hoàn tất thành công!"
@@ -888,23 +984,32 @@ EOF
 # -*- coding: utf-8 -*-
 
 """
-FastAPI Article Extractor
+FastAPI Article Extractor - Phiên bản cải tiến
 Tác giả: Nguyễn Ngọc Thiện
 YouTube: https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1
 Facebook: https://www.facebook.com/Ban.Thien.Handsome/
 Zalo/SDT: 08.8888.4749
 
-API để lấy nội dung bài viết từ URL sử dụng newspaper4k
+API để lấy nội dung bài viết từ URL sử dụng newspaper3k với các tính năng:
+- Lấy nội dung bài viết từ URL bất kỳ
+- Random User Agent để tránh bị chặn
+- Bảo mật với Bearer Token
+- Trang docs HTML riêng tùy chỉnh
+- Theo dõi bài viết mới (monitor feeds)
+- Cache kết quả để tăng tốc
 """
 
 import os
 import uvicorn
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, List
+import asyncio
+import hashlib
+import json
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Union
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, Request, status
+from fastapi import FastAPI, HTTPException, Depends, Request, status, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
