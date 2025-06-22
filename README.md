@@ -41,12 +41,12 @@
 
 ### Lệnh Cài Đặt Một Dòng
 ```bash
-curl -fsSL [https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh](https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh) | sudo bash
+curl -fsSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh | sudo bash
 ```
 
 ### Hoặc Tải Về và Chạy
 ```bash
-wget [https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh](https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh)
+wget https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh
 chmod +x n8n_install_auto.sh
 sudo ./n8n_install_auto.sh
 ```
