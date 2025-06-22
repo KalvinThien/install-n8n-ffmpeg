@@ -41,14 +41,14 @@
 
 ### Lệnh Cài Đặt Một Dòng
 ```bash
-curl -fsSL https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh | sudo bash
+curl -fsSL [https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh](https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh) | sudo bash
 ```
 
 ### Hoặc Tải Về và Chạy
 ```bash
-wget https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh
-chmod +x n8n_install_auto_improved.sh
-sudo ./n8n_install_auto_improved.sh
+wget [https://raw.githubusercontent.com/username/repo/main/n8n_install_auto_improved.sh](https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh)
+chmod +x n8n_install_auto.sh
+sudo ./n8n_install_auto.sh
 ```
 
 ---
@@ -58,22 +58,22 @@ sudo ./n8n_install_auto_improved.sh
 ### Tham Số Dòng Lệnh
 ```bash
 # Hiển thị trợ giúp
-sudo ./n8n_install_auto_improved.sh --help
+sudo ./n8n_install_auto.sh --help
 
 # Chỉ định thư mục cài đặt
-sudo ./n8n_install_auto_improved.sh --dir /opt/n8n
+sudo ./n8n_install_auto.sh --dir /opt/n8n
 
 # Bỏ qua cài đặt Docker (nếu đã có)
-sudo ./n8n_install_auto_improved.sh --skip-docker
+sudo ./n8n_install_auto.sh --skip-docker
 
 # Kích hoạt Telegram backup
 sudo ./n8n_install_auto_improved.sh --enable-telegram
 
 # Kích hoạt FastAPI
-sudo ./n8n_install_auto_improved.sh --enable-fastapi
+sudo ./n8n_install_auto.sh --enable-fastapi
 
 # Kết hợp nhiều tùy chọn
-sudo ./n8n_install_auto_improved.sh --dir /opt/n8n --enable-telegram --enable-fastapi
+sudo ./n8n_install_auto.sh --dir /opt/n8n --enable-telegram --enable-fastapi
 ```
 
 ---
