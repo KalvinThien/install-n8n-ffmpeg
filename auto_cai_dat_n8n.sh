@@ -417,10 +417,12 @@ RUN mkdir -p /files/youtube_content_anylystic && \
     mkdir -p /files/temp && \
     chown -R node:node /files
 
-# Cài đặt n8n-nodes-puppeteer trong thư mục n8n
+# Cài đặt n8n-nodes-puppeteer - BỎ QUA NẾU LỖI
 USER node
 WORKDIR /usr/local/lib/node_modules/n8n
-RUN npm install n8n-nodes-puppeteer --save 2>/dev/null || echo "Puppeteer nodes đã cài đặt"
+RUN echo "Thử cài đặt n8n-nodes-puppeteer..." && \
+    (npm install n8n-nodes-puppeteer --save 2>/dev/null || echo "⚠️ Bỏ qua n8n-nodes-puppeteer do lỗi workspace") && \
+    echo "Tiếp tục build..."
 
 # Kiểm tra các công cụ đã cài đặt - IMPROVED
 USER root
