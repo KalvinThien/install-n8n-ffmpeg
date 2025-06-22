@@ -356,16 +356,27 @@ mkdir -p $N8N_DIR/files/backup_full
 
 # Tiếp tục với phần tạo Dockerfile...
 
-# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
+# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER - SỬA LỖI
 echo "🐳 Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
 
 USER root
 
-# Cài đặt FFmpeg, wget, zip và các gói phụ thuộc khác
+# Cập nhật và cài đặt các packages cần thiết
 RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar \
+    apk add --no-cache \
+    ffmpeg \
+    wget \
+    zip \
+    unzip \
+    python3 \
+    py3-pip \
+    jq \
+    tar \
+    gzip \
+    curl \
+    bash \
     # Puppeteer dependencies
     chromium \
     nss \
@@ -379,35 +390,48 @@ RUN apk update && \
     font-noto-cjk \
     font-noto-emoji \
     dbus \
-    udev
+    udev \
+    # Thêm libs cần thiết cho các tools
+    libstdc++ \
+    libgcc
 
-# Cài đặt yt-dlp trực tiếp sử dụng pip trong container
-RUN pip3 install --break-system-packages -U yt-dlp && \
-    chmod +x /usr/bin/yt-dlp
+# Cài đặt yt-dlp - FIXED: Sử dụng phương pháp đáng tin cậy hơn
+RUN python3 -m pip install --break-system-packages --no-cache-dir yt-dlp && \
+    # Tạo symlink để đảm bảo yt-dlp có thể truy cập được
+    ln -sf /usr/lib/python*/site-packages/yt_dlp/__main__.py /usr/local/bin/yt-dlp && \
+    chmod +x /usr/local/bin/yt-dlp
 
 # Thiết lập biến môi trường cho Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    NODE_ENV=production
+
+# Tạo thư mục cần thiết với quyền phù hợp
+RUN mkdir -p /files/youtube_content_anylystic && \
+    mkdir -p /files/backup_full && \
+    mkdir -p /files/temp && \
+    chown -R node:node /files
 
 # Cài đặt n8n-nodes-puppeteer
 WORKDIR /usr/local/lib/node_modules/n8n
-RUN npm install n8n-nodes-puppeteer
+RUN npm install n8n-nodes-puppeteer --save
 
-# Kiểm tra cài đặt các công cụ
-RUN ffmpeg -version && \
+# Kiểm tra các công cụ đã cài đặt - IMPROVED
+RUN echo "=== KIỂM TRA CÔNG CỤ ===" && \
+    ffmpeg -version | head -n 1 && \
     wget --version | head -n 1 && \
-    zip --version | head -n 2 && \
-    yt-dlp --version && \
-    chromium-browser --version
-
-# Tạo thư mục youtube_content_anylystic và backup_full và set đúng quyền
-RUN mkdir -p /files/youtube_content_anylystic && \
-    mkdir -p /files/backup_full && \
-    chown -R node:node /files
+    python3 -m yt_dlp --version && \
+    chromium-browser --version && \
+    echo "=== TẤT CẢ CÔNG CỤ ĐÃ SẴN SÀNG ==="
 
 # Trở lại user node
 USER node
 WORKDIR /home/node
+
+# Thiết lập N8N_USER_FOLDER để đảm bảo quyền truy cập đúng
+ENV N8N_USER_FOLDER=/home/node/.n8n
+
+EXPOSE 5678
 EOF
 
 # Tạo file docker-compose.yml với cập nhật mới
@@ -442,12 +466,20 @@ services:
       # Cấu hình Puppeteer
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+      # Fix permissions
+      - N8N_USER_FOLDER=/home/node/.n8n
     volumes:
       - ${N8N_DIR}:/home/node/.n8n
       - ${N8N_DIR}/files:/files
     user: "1000:1000"
     cap_add:
       - SYS_ADMIN  # Thêm quyền cho Puppeteer
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   caddy:
     image: caddy:2
@@ -522,10 +554,10 @@ send_telegram_notification() {
             -d text="$message" \
             -d parse_mode="HTML" > /dev/null
         
-        # Gửi file backup nếu có và kích thước < 50MB
+        # Gửi file backup nếu có và kích thước < 20MB (giảm từ 50MB)
         if [ -n "$document_path" ] && [ -f "$document_path" ]; then
-            local file_size=$(stat --format="%s" "$document_path")
-            local max_size=$((50 * 1024 * 1024))  # 50MB in bytes
+            local file_size=$(stat --format="%s" "$document_path" 2>/dev/null || stat -c%s "$document_path" 2>/dev/null)
+            local max_size=$((20 * 1024 * 1024))  # 20MB in bytes
             
             if [ "$file_size" -lt "$max_size" ]; then
                 curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendDocument" \
@@ -535,7 +567,7 @@ send_telegram_notification() {
                 log "✅ Đã gửi file backup qua Telegram"
             else
                 local size_mb=$((file_size / 1024 / 1024))
-                log "⚠️ File backup quá lớn (${size_mb}MB) để gửi qua Telegram (giới hạn 50MB)"
+                log "⚠️ File backup quá lớn (${size_mb}MB) để gửi qua Telegram (giới hạn 20MB)"
                 curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
                     -d chat_id="$TELEGRAM_CHAT_ID" \
                     -d text="⚠️ File backup quá lớn (${size_mb}MB) để gửi qua Telegram" > /dev/null
@@ -544,18 +576,24 @@ send_telegram_notification() {
     fi
 }
 
-# Hàm kiểm tra và tạo thư mục backup
+# Hàm kiểm tra và tạo thư mục backup - FIXED
 setup_backup_directories() {
+    # Tạo thư mục backup nếu chưa có
+    mkdir -p "$BACKUP_DIR"
     mkdir -p "$TEMP_DIR"
     mkdir -p "$TEMP_DIR/workflows"
     mkdir -p "$TEMP_DIR/credentials"
     mkdir -p "$TEMP_DIR/settings"
-    mkdir -p "$BACKUP_DIR"
     
     if [ ! -d "$BACKUP_DIR" ]; then
         log "❌ Không thể tạo thư mục backup: $BACKUP_DIR"
         exit 1
     fi
+    
+    # Tạo file log nếu chưa có
+    touch "$BACKUP_DIR/backup.log"
+    
+    log "✅ Thư mục backup đã sẵn sàng: $BACKUP_DIR"
 }
 
 # Bắt đầu quá trình backup
@@ -584,7 +622,7 @@ fi
 if [ -z "$N8N_CONTAINER" ]; then
     log "❌ Không tìm thấy container n8n đang chạy"
     log "🔍 Danh sách containers đang chạy:"
-    docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" | log
+    docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}" >> "$BACKUP_DIR/backup.log"
     send_telegram_notification "❌ <b>Lỗi Backup N8N</b>%0A🔍 Không tìm thấy container n8n đang chạy"
     rm -rf "$TEMP_DIR"
     exit 1
@@ -965,7 +1003,7 @@ EOF
     cat << EOF > $N8N_DIR/fastapi_requirements.txt
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-newspaper4k==0.9.3.1
+newspaper3k==0.2.8
 requests==2.31.0
 python-multipart==0.0.6
 jinja2==3.1.2
@@ -975,6 +1013,10 @@ lxml==4.9.3
 python-dateutil==2.8.2
 pydantic==2.5.0
 aiofiles==23.2.1
+nltk==3.8.1
+Pillow==10.1.0
+feedparser==6.0.10
+tldextract==5.1.1
 EOF
 
     # Tạo ứng dụng FastAPI
@@ -997,6 +1039,7 @@ API để lấy nội dung bài viết từ URL sử dụng newspaper3k với c�
 - Trang docs HTML riêng tùy chỉnh
 - Theo dõi bài viết mới (monitor feeds)
 - Cache kết quả để tăng tốc
+- Curl examples tự động nhận diện domain
 """
 
 import os
@@ -1005,6 +1048,7 @@ import logging
 import asyncio
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List, Union
 from contextlib import asynccontextmanager
@@ -1056,6 +1100,22 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     return credentials.credentials
+
+def get_api_base_url(request: Request) -> str:
+    """Tự động nhận diện base URL từ request"""
+    # Lấy host từ request header
+    host = request.headers.get("host", "localhost:8000")
+    # Kiểm tra nếu request đến từ HTTPS
+    scheme = "https" if request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https" else "http"
+    
+    # Nếu host chứa api. thì giữ nguyên, nếu không thì thêm api.
+    if host.startswith("api."):
+        return f"{scheme}://{host}"
+    elif ":" in host:
+        # Nếu có port, thì sử dụng port thay vì api subdomain
+        return f"{scheme}://{host}"
+    else:
+        return f"{scheme}://api.{host}"
 
 # Models
 class ArticleRequest(BaseModel):
@@ -1210,7 +1270,7 @@ app = FastAPI(
     4. Headers: `Authorization: Bearer YOUR_PASSWORD`
     5. Body: `{"url": "https://example.com/article"}`
     """,
-    version="2.0.0",
+    version="2.1.0",
     contact={
         "name": "Nguyễn Ngọc Thiện",
         "url": "https://www.youtube.com/@kalvinthiensocial",
@@ -1222,13 +1282,17 @@ app = FastAPI(
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root(request: Request):
     """Trang chủ với hướng dẫn sử dụng"""
+    api_base_url = get_api_base_url(request)
+    
     return templates.TemplateResponse("index.html", {
         "request": request,
         "title": "N8N Article Extractor API",
         "author": "Nguyễn Ngọc Thiện",
         "youtube": "https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1",
         "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
-        "contact": "08.8888.4749"
+        "contact": "08.8888.4749",
+        "api_base_url": api_base_url,
+        "bearer_token": FASTAPI_PASSWORD
     })
 
 @app.get("/health")
@@ -1237,7 +1301,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "2.0.0",
+        "version": "2.1.0",
         "author": "Nguyễn Ngọc Thiện"
     }
 
@@ -1297,11 +1361,52 @@ async def extract_articles_batch(
         "processed_at": datetime.now().isoformat()
     }
 
+@app.get("/curl-examples")
+async def get_curl_examples(request: Request):
+    """Trả về các ví dụ curl commands"""
+    api_base_url = get_api_base_url(request)
+    
+    examples = {
+        "single_article": f"""curl -X POST "{api_base_url}/extract" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer {FASTAPI_PASSWORD}" \\
+  -d '{{"url": "https://vnexpress.net/sample-article", "language": "vi"}}'""",
+        
+        "batch_articles": f"""curl -X POST "{api_base_url}/extract/batch" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer {FASTAPI_PASSWORD}" \\
+  -d '["https://vnexpress.net/article-1", "https://vnexpress.net/article-2"]'""",
+        
+        "health_check": f"""curl -X GET "{api_base_url}/health" \\
+  -H "Content-Type: application/json\"""",
+        
+        "stats": f"""curl -X GET "{api_base_url}/stats" \\
+  -H "Authorization: Bearer {FASTAPI_PASSWORD}\""""
+    }
+    
+    return {
+        "api_base_url": api_base_url,
+        "bearer_token": FASTAPI_PASSWORD,
+        "examples": examples,
+        "n8n_http_node_config": {
+            "url": f"{api_base_url}/extract",
+            "method": "POST",
+            "headers": {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {FASTAPI_PASSWORD}"
+            },
+            "body": {
+                "url": "{{ $json.article_url }}",
+                "language": "vi"
+            }
+        }
+    }
+
 @app.get("/stats", dependencies=[Depends(verify_token)])
 async def get_stats():
     """Thống kê sử dụng API"""
     return {
-        "api_version": "2.0.0",
+        "api_version": "2.1.0",
         "author": "Nguyễn Ngọc Thiện",
         "contact": "08.8888.4749",
         "youtube_channel": "https://www.youtube.com/@kalvinthiensocial",
@@ -1314,7 +1419,8 @@ async def get_stats():
             "Multi-language support",
             "Batch processing",
             "Random User-Agent",
-            "Retry mechanism"
+            "Retry mechanism",
+            "Auto curl examples generation"
         ]
     }
 
@@ -1472,6 +1578,24 @@ EOF
             overflow-x: auto;
             margin: 15px 0;
             font-size: 0.9em;
+            position: relative;
+        }
+        
+        .copy-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+        
+        .copy-button:hover {
+            background: #764ba2;
         }
         
         .features {
@@ -1499,6 +1623,32 @@ EOF
         .feature-icon {
             font-size: 3em;
             margin-bottom: 20px;
+        }
+        
+        .curl-examples {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+        }
+        
+        .curl-examples h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .curl-example {
+            margin: 20px 0;
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .curl-example h4 {
+            color: #667eea;
+            margin-bottom: 15px;
         }
         
         .footer {
@@ -1529,6 +1679,7 @@ EOF
         <div class="header">
             <h1>🚀 {{ title }}</h1>
             <p>API Trích Xuất Nội Dung Bài Viết Tự Động</p>
+            <p><small>🌐 Base URL: {{ api_base_url }}</small></p>
         </div>
         
         <div class="content">
@@ -1576,45 +1727,83 @@ EOF
                 </div>
             </div>
             
+            <!-- PHẦN MỚI: CURL EXAMPLES -->
+            <div class="curl-examples">
+                <h3>🖥️ Ví Dụ Curl Commands - Sao Chép Ngay Vào N8N</h3>
+                <p style="text-align: center; margin-bottom: 30px;">
+                    <strong>🔑 Bearer Token:</strong> <code>{{ bearer_token }}</code>
+                </p>
+                
+                <div class="curl-example">
+                    <h4>📄 1. Trích xuất một bài viết</h4>
+                    <pre><button class="copy-button" onclick="copyToClipboard(this)">Copy</button>curl -X POST "{{ api_base_url }}/extract" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {{ bearer_token }}" \
+  -d '{"url": "https://vnexpress.net/sample-article", "language": "vi"}'</pre>
+                </div>
+                
+                <div class="curl-example">
+                    <h4>📄 2. Trích xuất nhiều bài viết (Batch)</h4>
+                    <pre><button class="copy-button" onclick="copyToClipboard(this)">Copy</button>curl -X POST "{{ api_base_url }}/extract/batch" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer {{ bearer_token }}" \
+  -d '["https://vnexpress.net/article-1", "https://vnexpress.net/article-2"]'</pre>
+                </div>
+                
+                <div class="curl-example">
+                    <h4>❤️ 3. Health Check</h4>
+                    <pre><button class="copy-button" onclick="copyToClipboard(this)">Copy</button>curl -X GET "{{ api_base_url }}/health" \
+  -H "Content-Type: application/json"</pre>
+                </div>
+                
+                <div class="curl-example">
+                    <h4>📊 4. Lấy thống kê API</h4>
+                    <pre><button class="copy-button" onclick="copyToClipboard(this)">Copy</button>curl -X GET "{{ api_base_url }}/stats" \
+  -H "Authorization: Bearer {{ bearer_token }}"</pre>
+                </div>
+                
+                <div class="curl-example">
+                    <h4>📋 5. Lấy tất cả ví dụ curl (JSON)</h4>
+                    <pre><button class="copy-button" onclick="copyToClipboard(this)">Copy</button>curl -X GET "{{ api_base_url }}/curl-examples" \
+  -H "Content-Type: application/json"</pre>
+                </div>
+            </div>
+            
             <div class="api-docs">
-                <h3>📖 Hướng Dẫn Sử Dụng API</h3>
+                <h3>🔧 Cấu Hình N8N HTTP Request Node</h3>
                 
                 <div class="endpoint">
                     <span class="endpoint-method post">POST</span>
                     <strong>/extract</strong> - Trích xuất nội dung từ một URL
                     
-                    <pre>{
-  "url": "https://vnexpress.net/sample-article",
+                    <h4>🔧 Cấu hình trong N8N:</h4>
+                    <ul>
+                        <li><strong>URL:</strong> <code>{{ api_base_url }}/extract</code></li>
+                        <li><strong>Method:</strong> POST</li>
+                        <li><strong>Headers:</strong></li>
+                        <pre>Authorization: Bearer {{ bearer_token }}
+Content-Type: application/json</pre>
+                        <li><strong>Body (JSON):</strong></li>
+                        <pre>{
+  "url": "{{ "{{ $json.article_url }}" }}",
   "language": "vi"
 }</pre>
+                    </ul>
                 </div>
                 
-                <div class="endpoint">
-                    <span class="endpoint-method post">POST</span>
-                    <strong>/extract/batch</strong> - Trích xuất nhiều URL cùng lúc
-                    
-                    <pre>[
-  "https://vnexpress.net/article-1",
-  "https://vnexpress.net/article-2"
-]</pre>
-                </div>
-                
-                <div class="endpoint">
-                    <span class="endpoint-method">GET</span>
-                    <strong>/health</strong> - Kiểm tra trạng thái API
-                </div>
-                
-                <h4>🔑 Authentication Header:</h4>
-                <pre>Authorization: Bearer YOUR_PASSWORD</pre>
-                
-                <h4>📊 Sử dụng với N8N:</h4>
-                <ol>
-                    <li>Thêm HTTP Request node</li>
-                    <li>URL: <code>https://api.yourdomain.com/extract</code></li>
-                    <li>Method: POST</li>
-                    <li>Headers: <code>Authorization: Bearer YOUR_PASSWORD</code></li>
-                    <li>Body: JSON với URL cần trích xuất</li>
-                </ol>
+                <h4>📄 Ví dụ Response thành công:</h4>
+                <pre>{
+  "success": true,
+  "url": "https://vnexpress.net/sample-article",
+  "title": "Tiêu đề bài viết",
+  "text": "Nội dung bài viết...",
+  "summary": "Tóm tắt tự động...",
+  "authors": ["Tác giả 1"],
+  "publish_date": "2024-01-01T00:00:00",
+  "top_image": "https://example.com/image.jpg",
+  "keywords": ["từ khóa 1", "từ khóa 2"],
+  "processing_time": 2.5
+}</pre>
             </div>
             
             <div class="api-docs">
@@ -1622,6 +1811,7 @@ EOF
                 <ul style="list-style: none; padding: 0;">
                     <li style="margin: 10px 0;">📚 <a href="/docs" target="_blank">API Documentation (Swagger)</a></li>
                     <li style="margin: 10px 0;">🔧 <a href="/redoc" target="_blank">API Documentation (ReDoc)</a></li>
+                    <li style="margin: 10px 0;">📋 <a href="/curl-examples" target="_blank">Curl Examples (JSON)</a></li>
                     <li style="margin: 10px 0;">❤️ <a href="/health" target="_blank">Health Check</a></li>
                 </ul>
             </div>
@@ -1630,8 +1820,32 @@ EOF
         <div class="footer">
             <p>&copy; 2024 {{ author }}. Made with ❤️ for N8N Community</p>
             <p>🎥 Subscribe: {{ youtube }}</p>
+            <p>🌐 API: {{ api_base_url }}</p>
         </div>
     </div>
+    
+    <script>
+        function copyToClipboard(button) {
+            const pre = button.parentElement;
+            const text = pre.textContent.replace('Copy', '').trim();
+            
+            navigator.clipboard.writeText(text).then(function() {
+                button.textContent = 'Copied!';
+                button.style.background = '#28a745';
+                setTimeout(function() {
+                    button.textContent = 'Copy';
+                    button.style.background = '#667eea';
+                }, 2000);
+            }, function(err) {
+                button.textContent = 'Error';
+                button.style.background = '#dc3545';
+                setTimeout(function() {
+                    button.textContent = 'Copy';
+                    button.style.background = '#667eea';
+                }, 2000);
+            });
+        }
+    </script>
 </body>
 </html>
 EOF
