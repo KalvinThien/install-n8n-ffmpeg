@@ -267,6 +267,64 @@ fi
 # Cài đặt Docker và Docker Compose
 install_docker
 
+# Function cleanup containers và images cũ
+cleanup_old_installation() {
+    echo "🧹 Dọn dẹp các container và image cũ..."
+    
+    # Chuyển đến thư mục N8N nếu có
+    if [ -d "$N8N_DIR" ]; then
+        cd "$N8N_DIR"
+        
+        # Dừng và xóa containers bằng docker-compose nếu có
+        if [ -f "docker-compose.yml" ]; then
+            echo "Dừng containers với docker-compose..."
+            if command -v docker-compose &> /dev/null; then
+                docker-compose down --remove-orphans --volumes 2>/dev/null || true
+            elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+                docker compose down --remove-orphans --volumes 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # Dừng tất cả containers liên quan
+    echo "Dừng các container cũ..."
+    docker stop \$(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
+    docker stop \$(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
+    docker stop \$(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    
+    # Xóa containers cũ
+    echo "Xóa các container cũ..."
+    docker rm \$(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
+    docker rm \$(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
+    docker rm \$(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    
+    # Xóa images cũ nếu có
+    echo "Xóa các image cũ..."
+    docker rmi n8n-ffmpeg-latest 2>/dev/null || true
+    docker rmi \$(docker images -q --filter "dangling=true") 2>/dev/null || true
+    
+    # Xóa networks orphan
+    echo "Dọn dẹp networks..."
+    docker network prune -f 2>/dev/null || true
+    
+    # Dọn dẹp volumes không sử dụng (cẩn thận với volumes)
+    echo "Dọn dẹp volumes không sử dụng..."
+    docker volume ls -q --filter "dangling=true" | xargs -r docker volume rm 2>/dev/null || true
+    
+    echo "✅ Hoàn tất dọn dẹp!"
+}
+
+# Kiểm tra xem có cần dọn dẹp không
+echo "🔍 Kiểm tra các container N8N hiện có..."
+EXISTING_CONTAINERS=\$(docker ps -a --filter "name=n8n" --format "{{.Names}}" 2>/dev/null || true)
+if [ -n "\$EXISTING_CONTAINERS" ]; then
+    echo "⚠️  Phát hiện container N8N cũ: \$EXISTING_CONTAINERS"
+    read -p "Bạn có muốn dọn dẹp và cài đặt lại từ đầu? (y/n): " CLEANUP_CHOICE
+    if [ "\$CLEANUP_CHOICE" = "y" ] || [ "\$CLEANUP_CHOICE" = "Y" ]; then
+        cleanup_old_installation
+    fi
+fi
+
 # Tạo thư mục cho n8n
 echo "Tạo cấu trúc thư mục cho n8n tại $N8N_DIR..."
 mkdir -p $N8N_DIR
@@ -988,33 +1046,54 @@ fi
 echo "Kiểm tra quyền truy cập Docker..."
 if ! docker ps &>/dev/null; then
     echo "Khởi động container với sudo vì quyền truy cập Docker..."
-    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
-    if command -v docker-compose &> /dev/null; then
-        sudo docker-compose up -d
-    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        sudo docker compose up -d
-    else
-        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
-        exit 1
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
     fi
 else
-    # Sử dụng docker-compose hoặc docker compose tùy theo phiên bản
-    if command -v docker-compose &> /dev/null; then
-        docker-compose up -d
-    elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        docker compose up -d
-    else
-        echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose."
-        exit 1
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
     fi
 fi
 
-# Đợi một lúc để các container có thể khởi động
-echo "Đợi các container khởi động..."
-sleep 15
+# Build và khởi động containers với error handling
+echo "🔨 Bắt đầu build Docker image..."
+BUILD_OUTPUT=\$(\$DOCKER_COMPOSE_CMD build 2>&1)
+BUILD_EXIT_CODE=\$?
+
+if [ \$BUILD_EXIT_CODE -ne 0 ]; then
+    echo "❌ Lỗi build Docker image:"
+    echo "\$BUILD_OUTPUT"
+    echo ""
+    echo "Có thể thử các cách khắc phục sau:"
+    echo "1. Chạy lại script này"
+    echo "2. Kiểm tra kết nối internet"
+    echo "3. Giải phóng dung lượng disk"
+    exit 1
+else
+    echo "✅ Build Docker image thành công!"
+fi
+
+echo "🚀 Khởi động containers..."
+START_OUTPUT=\$(\$DOCKER_COMPOSE_CMD up -d --remove-orphans 2>&1)
+START_EXIT_CODE=\$?
+
+if [ \$START_EXIT_CODE -ne 0 ]; then
+    echo "❌ Lỗi khởi động containers:"
+    echo "\$START_OUTPUT"
+    exit 1
+else
+    echo "✅ Containers đã được khởi động!"
+fi
+
+# Đợi lâu hơn để các container có thể khởi động hoàn toàn
+echo "⏳ Đợi containers khởi động hoàn toàn (30 giây)..."
+sleep 30
 
 # Kiểm tra các container đã chạy chưa
-echo "Kiểm tra các container đã chạy chưa..."
+echo "🔍 Kiểm tra trạng thái containers..."
+
 # Xác định lệnh docker phù hợp với quyền truy cập
 if ! docker ps &>/dev/null; then
     DOCKER_CMD="sudo docker"
@@ -1030,20 +1109,37 @@ else
     fi
 fi
 
-if $DOCKER_CMD ps | grep -q "n8n-ffmpeg-latest" || $DOCKER_CMD ps | grep -q "n8n"; then
-    echo "Container n8n đã chạy thành công."
+# Kiểm tra container N8N
+N8N_RUNNING=\$(\$DOCKER_CMD ps --filter "name=n8n" --format "{{.Names}}" 2>/dev/null)
+if [ -n "\$N8N_RUNNING" ]; then
+    N8N_STATUS=\$(\$DOCKER_CMD ps --filter "name=n8n" --format "{{.Status}}" 2>/dev/null)
+    echo "✅ Container N8N: \$N8N_RUNNING - \$N8N_STATUS"
 else
-    echo "Container n8n đang được khởi động, có thể mất thêm thời gian..."
-    echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    echo "  $DOCKER_COMPOSE_CMD logs -f"
+    echo "❌ Container N8N: Không chạy hoặc lỗi khởi động"
+    echo "📋 Kiểm tra logs N8N:"
+    echo "   \$DOCKER_COMPOSE_CMD logs n8n"
+    echo ""
 fi
 
-if $DOCKER_CMD ps | grep -q "caddy:2"; then
-    echo "Container caddy đã chạy thành công."
+# Kiểm tra container Caddy
+CADDY_RUNNING=\$(\$DOCKER_CMD ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null)
+if [ -n "\$CADDY_RUNNING" ]; then
+    CADDY_STATUS=\$(\$DOCKER_CMD ps --filter "name=caddy" --format "{{.Status}}" 2>/dev/null)
+    echo "✅ Container Caddy: \$CADDY_RUNNING - \$CADDY_STATUS"
 else
-    echo "Container caddy đang được khởi động, có thể mất thêm thời gian..."
-    echo "Bạn có thể kiểm tra logs bằng lệnh:"
-    echo "  $DOCKER_COMPOSE_CMD logs -f"
+    echo "❌ Container Caddy: Không chạy hoặc lỗi khởi động"
+    echo "📋 Kiểm tra logs Caddy:"
+    echo "   \$DOCKER_COMPOSE_CMD logs caddy"
+    echo ""
+fi
+
+# Nếu có container không chạy, hiển thị thông tin troubleshooting
+if [ -z "\$N8N_RUNNING" ] || [ -z "\$CADDY_RUNNING" ]; then
+    echo "⚠️  Một hoặc nhiều container không chạy. Các bước khắc phục:"
+    echo "1. Kiểm tra logs: \$DOCKER_COMPOSE_CMD logs"
+    echo "2. Restart containers: \$DOCKER_COMPOSE_CMD restart"
+    echo "3. Rebuild từ đầu: \$DOCKER_COMPOSE_CMD down && \$DOCKER_COMPOSE_CMD up -d --build"
+    echo ""
 fi
 
 # Hiển thị thông tin về cổng được sử dụng
@@ -1193,6 +1289,87 @@ EOF
 # Đặt quyền thực thi cho script cập nhật
 chmod +x $N8N_DIR/update-n8n.sh
 
+# Tạo script khắc phục sự cố
+echo "Tạo script khắc phục sự cố..."
+cat << 'EOF' > $N8N_DIR/troubleshoot.sh
+#!/bin/bash
+
+# Script khắc phục sự cố N8N
+echo "🔧 SCRIPT KHẮC PHỤC SỰ CỐ N8N"
+echo "================================"
+
+N8N_DIR="$(dirname "$0")"
+cd "$N8N_DIR"
+
+# Xác định docker command
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_CMD="docker"
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+fi
+
+echo "1. Kiểm tra trạng thái containers..."
+echo "=================================="
+$DOCKER_CMD ps --filter "name=n8n" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+echo ""
+
+echo "2. Kiểm tra logs containers..."
+echo "============================="
+echo ">> N8N Logs (10 dòng cuối):"
+$DOCKER_COMPOSE_CMD logs --tail=10 n8n 2>/dev/null || echo "Không thể lấy logs N8N"
+echo ""
+echo ">> Caddy Logs (10 dòng cuối):"
+$DOCKER_COMPOSE_CMD logs --tail=10 caddy 2>/dev/null || echo "Không thể lấy logs Caddy"
+echo ""
+
+echo "3. Kiểm tra network connectivity..."
+echo "==================================="
+echo ">> Kiểm tra cổng 5678 (N8N internal):"
+$DOCKER_CMD exec $(docker ps -q --filter "name=n8n" | head -1) netstat -tuln | grep :5678 2>/dev/null || echo "N8N port không listening"
+echo ""
+
+echo "4. Kiểm tra disk space..."
+echo "========================"
+df -h | head -1
+df -h | grep -E '(/$|/var|/home)'
+echo ""
+
+echo "5. Các lệnh khắc phục thường dùng:"
+echo "================================="
+echo "• Restart containers:"
+echo "  $DOCKER_COMPOSE_CMD restart"
+echo ""
+echo "• Rebuild containers:"
+echo "  $DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d --build"
+echo ""
+echo "• Xem logs realtime:"
+echo "  $DOCKER_COMPOSE_CMD logs -f"
+echo ""
+echo "• Kiểm tra resources:"
+echo "  $DOCKER_CMD stats --no-stream"
+echo ""
+
+read -p "Bạn có muốn restart containers ngay bây giờ? (y/n): " RESTART_CHOICE
+if [ "$RESTART_CHOICE" = "y" ] || [ "$RESTART_CHOICE" = "Y" ]; then
+    echo "🔄 Đang restart containers..."
+    $DOCKER_COMPOSE_CMD restart
+    echo "✅ Hoàn tất restart. Đợi 30 giây để containers khởi động..."
+    sleep 30
+    echo "Trạng thái sau khi restart:"
+    $DOCKER_CMD ps --filter "name=n8n"
+fi
+EOF
+
+chmod +x $N8N_DIR/troubleshoot.sh
+
 # Tạo cron job để chạy mỗi 12 giờ
 echo "Thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày..."
 UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
@@ -1311,14 +1488,16 @@ echo "  - Thư mục video: $N8N_DIR/files/youtube_content_anylystic/"
 echo ""
 
 echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
-echo "  - Xem logs n8n: docker logs n8n-n8n-1 -f"
-echo "  - Restart n8n: cd $N8N_DIR && docker-compose restart"
-echo "  - Backup thủ công: $N8N_DIR/backup-workflows.sh"
-echo "  - Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
+echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
+echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
+echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
+echo "  - 💾 Backup thủ công: $N8N_DIR/backup-workflows.sh"
+echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
+echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - Restart News API: systemctl restart news-api"
-    echo "  - Xem logs News API: journalctl -u news-api -f"
+    echo "  - 🔄 Restart News API: systemctl restart news-api"
+    echo "  - 📋 Xem logs News API: journalctl -u news-api -f"
 fi
 echo ""
 
