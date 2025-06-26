@@ -288,20 +288,20 @@ cleanup_old_installation() {
     
     # Dừng tất cả containers liên quan
     echo "Dừng các container cũ..."
-    docker stop \$(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
-    docker stop \$(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
-    docker stop \$(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    docker stop $(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
+    docker stop $(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
+    docker stop $(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
     
     # Xóa containers cũ
     echo "Xóa các container cũ..."
-    docker rm \$(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
-    docker rm \$(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
-    docker rm \$(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    docker rm $(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
+    docker rm $(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
+    docker rm $(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
     
     # Xóa images cũ nếu có
     echo "Xóa các image cũ..."
     docker rmi n8n-ffmpeg-latest 2>/dev/null || true
-    docker rmi \$(docker images -q --filter "dangling=true") 2>/dev/null || true
+    docker rmi $(docker images -q --filter "dangling=true") 2>/dev/null || true
     
     # Xóa networks orphan
     echo "Dọn dẹp networks..."
@@ -316,11 +316,11 @@ cleanup_old_installation() {
 
 # Kiểm tra xem có cần dọn dẹp không
 echo "🔍 Kiểm tra các container N8N hiện có..."
-EXISTING_CONTAINERS=\$(docker ps -a --filter "name=n8n" --format "{{.Names}}" 2>/dev/null || true)
-if [ -n "\$EXISTING_CONTAINERS" ]; then
-    echo "⚠️  Phát hiện container N8N cũ: \$EXISTING_CONTAINERS"
+EXISTING_CONTAINERS=$(docker ps -a --filter "name=n8n" --format "{{.Names}}" 2>/dev/null || true)
+if [ -n "$EXISTING_CONTAINERS" ]; then
+    echo "⚠️  Phát hiện container N8N cũ: $EXISTING_CONTAINERS"
     read -p "Bạn có muốn dọn dẹp và cài đặt lại từ đầu? (y/n): " CLEANUP_CHOICE
-    if [ "\$CLEANUP_CHOICE" = "y" ] || [ "\$CLEANUP_CHOICE" = "Y" ]; then
+    if [ "$CLEANUP_CHOICE" = "y" ] || [ "$CLEANUP_CHOICE" = "Y" ]; then
         cleanup_old_installation
     fi
 fi
@@ -1059,12 +1059,12 @@ fi
 
 # Build và khởi động containers với error handling
 echo "🔨 Bắt đầu build Docker image..."
-BUILD_OUTPUT=\$(\$DOCKER_COMPOSE_CMD build 2>&1)
-BUILD_EXIT_CODE=\$?
+BUILD_OUTPUT=$($DOCKER_COMPOSE_CMD build 2>&1)
+BUILD_EXIT_CODE=$?
 
-if [ \$BUILD_EXIT_CODE -ne 0 ]; then
+if [ $BUILD_EXIT_CODE -ne 0 ]; then
     echo "❌ Lỗi build Docker image:"
-    echo "\$BUILD_OUTPUT"
+    echo "$BUILD_OUTPUT"
     echo ""
     echo "Có thể thử các cách khắc phục sau:"
     echo "1. Chạy lại script này"
@@ -1076,12 +1076,12 @@ else
 fi
 
 echo "🚀 Khởi động containers..."
-START_OUTPUT=\$(\$DOCKER_COMPOSE_CMD up -d --remove-orphans 2>&1)
-START_EXIT_CODE=\$?
+START_OUTPUT=$($DOCKER_COMPOSE_CMD up -d --remove-orphans 2>&1)
+START_EXIT_CODE=$?
 
-if [ \$START_EXIT_CODE -ne 0 ]; then
+if [ $START_EXIT_CODE -ne 0 ]; then
     echo "❌ Lỗi khởi động containers:"
-    echo "\$START_OUTPUT"
+    echo "$START_OUTPUT"
     exit 1
 else
     echo "✅ Containers đã được khởi động!"
@@ -1110,35 +1110,35 @@ else
 fi
 
 # Kiểm tra container N8N
-N8N_RUNNING=\$(\$DOCKER_CMD ps --filter "name=n8n" --format "{{.Names}}" 2>/dev/null)
-if [ -n "\$N8N_RUNNING" ]; then
-    N8N_STATUS=\$(\$DOCKER_CMD ps --filter "name=n8n" --format "{{.Status}}" 2>/dev/null)
-    echo "✅ Container N8N: \$N8N_RUNNING - \$N8N_STATUS"
+N8N_RUNNING=$($DOCKER_CMD ps --filter "name=n8n" --format "{{.Names}}" 2>/dev/null)
+if [ -n "$N8N_RUNNING" ]; then
+    N8N_STATUS=$($DOCKER_CMD ps --filter "name=n8n" --format "{{.Status}}" 2>/dev/null)
+    echo "✅ Container N8N: $N8N_RUNNING - $N8N_STATUS"
 else
     echo "❌ Container N8N: Không chạy hoặc lỗi khởi động"
     echo "📋 Kiểm tra logs N8N:"
-    echo "   \$DOCKER_COMPOSE_CMD logs n8n"
+    echo "   $DOCKER_COMPOSE_CMD logs n8n"
     echo ""
 fi
 
 # Kiểm tra container Caddy
-CADDY_RUNNING=\$(\$DOCKER_CMD ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null)
-if [ -n "\$CADDY_RUNNING" ]; then
-    CADDY_STATUS=\$(\$DOCKER_CMD ps --filter "name=caddy" --format "{{.Status}}" 2>/dev/null)
-    echo "✅ Container Caddy: \$CADDY_RUNNING - \$CADDY_STATUS"
+CADDY_RUNNING=$($DOCKER_CMD ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null)
+if [ -n "$CADDY_RUNNING" ]; then
+    CADDY_STATUS=$($DOCKER_CMD ps --filter "name=caddy" --format "{{.Status}}" 2>/dev/null)
+    echo "✅ Container Caddy: $CADDY_RUNNING - $CADDY_STATUS"
 else
     echo "❌ Container Caddy: Không chạy hoặc lỗi khởi động"
     echo "📋 Kiểm tra logs Caddy:"
-    echo "   \$DOCKER_COMPOSE_CMD logs caddy"
+    echo "   $DOCKER_COMPOSE_CMD logs caddy"
     echo ""
 fi
 
 # Nếu có container không chạy, hiển thị thông tin troubleshooting
-if [ -z "\$N8N_RUNNING" ] || [ -z "\$CADDY_RUNNING" ]; then
+if [ -z "$N8N_RUNNING" ] || [ -z "$CADDY_RUNNING" ]; then
     echo "⚠️  Một hoặc nhiều container không chạy. Các bước khắc phục:"
-    echo "1. Kiểm tra logs: \$DOCKER_COMPOSE_CMD logs"
-    echo "2. Restart containers: \$DOCKER_COMPOSE_CMD restart"
-    echo "3. Rebuild từ đầu: \$DOCKER_COMPOSE_CMD down && \$DOCKER_COMPOSE_CMD up -d --build"
+    echo "1. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
+    echo "2. Restart containers: $DOCKER_COMPOSE_CMD restart"
+    echo "3. Rebuild từ đầu: $DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d --build"
     echo ""
 fi
 
