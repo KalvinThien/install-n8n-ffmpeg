@@ -2,7 +2,7 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer, Lấy Nội Dung Bài Viết với API riêng và SSL tự động  "
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -249,6 +249,7 @@ if [ "$SETUP_NEWS_API" = "y" ] || [ "$SETUP_NEWS_API" = "Y" ]; then
         echo "⚠️ Bạn chưa nhập token, sử dụng token tự động: $NEWS_API_TOKEN"
     fi
     echo "✅ Sẽ tạo News API với Bearer Token đã cấu hình"
+    echo "🔑 Lưu token này để sử dụng: $NEWS_API_TOKEN"
 else
     SETUP_NEWS_API="n"
 fi
@@ -402,6 +403,7 @@ EOF
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
 if [ "$SETUP_NEWS_API" = "y" ]; then
+    # Docker-compose với FastAPI
     cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, Puppeteer và News API
 services:
@@ -472,6 +474,7 @@ volumes:
   caddy_config:
 EOF
 else
+    # Docker-compose không có FastAPI
     cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
@@ -529,6 +532,7 @@ fi
 # Tạo file Caddyfile
 echo "Tạo file Caddyfile..."
 if [ "$SETUP_NEWS_API" = "y" ]; then
+    # Caddyfile với API subdomain
     cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
@@ -539,6 +543,7 @@ api.${DOMAIN} {
 }
 EOF
 else
+    # Caddyfile chỉ có domain chính
     cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
@@ -663,8 +668,8 @@ BACKUP_COUNT=\$(ls -1 \$BACKUP_DIR/n8n_backup_*.tar 2>/dev/null | wc -l)
 log "Hiện có \$BACKUP_COUNT bản sao lưu trong thư mục"
 
 # Gửi backup qua Telegram (nếu được cấu hình)
-if [ -f "\$N8N_DIR/telegram_config.txt" ]; then
-    source "\$N8N_DIR/telegram_config.txt"
+if [ -f "\$N8N_DIR/telegram_backup.conf" ]; then
+    source "\$N8N_DIR/telegram_backup.conf"
     if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
         log "Đang gửi backup qua Telegram..."
         curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendDocument" \
@@ -681,94 +686,69 @@ EOF
 # Đặt quyền thực thi cho script sao lưu
 chmod +x $N8N_DIR/backup-workflows.sh
 
-# Tạo script backup thủ công để test
-echo "Tạo script backup thủ công để test..."
-cat << 'EOF' > $N8N_DIR/manual_backup.sh
+# Tạo script backup thủ công
+echo "Tạo script backup thủ công..."
+cat << 'EOF' > $N8N_DIR/manual-backup.sh
 #!/bin/bash
 
-echo "🔄 BACKUP THỦ CÔNG N8N"
-echo "======================"
+# Script backup thủ công với đầy đủ thông tin
+echo "🔄 BẮT ĐẦU BACKUP THỦ CÔNG"
+echo "========================="
 
 N8N_DIR="$(dirname "$0")"
 cd "$N8N_DIR"
 
-# Kiểm tra docker command
-if ! docker ps &>/dev/null; then
-    DOCKER_CMD="sudo docker"
-    DOCKER_COMPOSE_CMD="sudo docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="sudo docker compose"
-    fi
-else
-    DOCKER_CMD="docker"
-    DOCKER_COMPOSE_CMD="docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="docker compose"
-    fi
-fi
+# Chạy script backup chính
+echo "Chạy script backup chính..."
+./backup-workflows.sh
 
-echo "1. Kiểm tra container N8N..."
-N8N_CONTAINER=$($DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
-if [ -z "$N8N_CONTAINER" ]; then
-    echo "❌ Container N8N không chạy!"
-    echo "Hãy khởi động N8N trước: $DOCKER_COMPOSE_CMD up -d"
-    exit 1
+# Hiển thị thông tin backup
+echo ""
+echo "📊 THÔNG TIN BACKUP:"
+echo "==================="
+
+BACKUP_DIR="$N8N_DIR/files/backup_full"
+if [ -d "$BACKUP_DIR" ]; then
+    echo "📁 Thư mục backup: $BACKUP_DIR"
+    echo "📈 Số lượng backup:"
+    ls -1 "$BACKUP_DIR"/n8n_backup_*.tar* 2>/dev/null | wc -l || echo "0"
+    
+    echo ""
+    echo "📋 Danh sách backup gần nhất:"
+    ls -lht "$BACKUP_DIR"/n8n_backup_*.tar* 2>/dev/null | head -5 || echo "Chưa có backup nào"
+    
+    echo ""
+    echo "💾 Tổng dung lượng backup:"
+    du -sh "$BACKUP_DIR" 2>/dev/null || echo "N/A"
+    
+    # Kiểm tra backup log
+    if [ -f "$BACKUP_DIR/backup.log" ]; then
+        echo ""
+        echo "📜 Log backup mới nhất (5 dòng cuối):"
+        tail -5 "$BACKUP_DIR/backup.log"
+    fi
 else
-    echo "✅ Container N8N đang chạy: $N8N_CONTAINER"
+    echo "❌ Thư mục backup không tồn tại: $BACKUP_DIR"
 fi
 
 echo ""
-echo "2. Chạy script backup..."
-if [ -f "./backup-workflows.sh" ]; then
-    ./backup-workflows.sh
-    BACKUP_STATUS=$?
-    
-    if [ $BACKUP_STATUS -eq 0 ]; then
-        echo ""
-        echo "✅ BACKUP HOÀN TẤT THÀNH CÔNG!"
-        echo ""
-        echo "📁 Kiểm tra file backup:"
-        ls -la ./files/backup_full/n8n_backup_*.tar 2>/dev/null | tail -5
-        echo ""
-        echo "📊 Thống kê backup:"
-        BACKUP_COUNT=$(ls -1 ./files/backup_full/n8n_backup_*.tar 2>/dev/null | wc -l)
-        echo "  - Tổng số backup: $BACKUP_COUNT"
-        
-        if [ $BACKUP_COUNT -gt 0 ]; then
-            LATEST_BACKUP=$(ls -t ./files/backup_full/n8n_backup_*.tar 2>/dev/null | head -1)
-            BACKUP_SIZE=$(du -h "$LATEST_BACKUP" 2>/dev/null | cut -f1)
-            echo "  - Backup mới nhất: $(basename "$LATEST_BACKUP")"
-            echo "  - Kích thước: $BACKUP_SIZE"
-        fi
-        
-        echo ""
-        echo "📋 Xem log chi tiết:"
-        echo "  tail -20 ./files/backup_full/backup.log"
-    else
-        echo "❌ BACKUP THẤT BẠI!"
-        echo "📋 Kiểm tra log lỗi:"
-        echo "  tail -20 ./files/backup_full/backup.log"
-    fi
-else
-    echo "❌ Không tìm thấy script backup-workflows.sh"
-    exit 1
-fi
+echo "✅ HOÀN TẤT BACKUP THỦ CÔNG"
 EOF
 
-chmod +x $N8N_DIR/manual_backup.sh
+chmod +x $N8N_DIR/manual-backup.sh
 
 # Lưu cấu hình Telegram nếu có
 if [ "$SETUP_TELEGRAM" = "y" ] && [ -f "/tmp/telegram_config.txt" ]; then
     echo "Lưu cấu hình Telegram..."
-    mv /tmp/telegram_config.txt $N8N_DIR/telegram_config.txt
-    chmod 600 $N8N_DIR/telegram_config.txt
+    mv /tmp/telegram_config.txt $N8N_DIR/telegram_backup.conf
+    chmod 600 $N8N_DIR/telegram_backup.conf
 fi
 
 # Tạo News API nếu người dùng chọn
 if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "Đang tạo News Content API với FastAPI và Newspaper4k..."
     
-    # Tạo thư mục cho News API
+    # Tạo thư mục cho FastAPI
     mkdir -p $N8N_DIR/fastapi
     
     # Tạo Dockerfile cho FastAPI
@@ -776,6 +756,11 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
 FROM python:3.11-slim
 
 WORKDIR /app
+
+# Cài đặt các gói hệ thống cần thiết
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -790,7 +775,7 @@ EOF
     # Tạo requirements.txt
     cat << 'EOF' > $N8N_DIR/fastapi/requirements.txt
 fastapi==0.104.1
-uvicorn==0.24.0
+uvicorn[standard]==0.24.0
 newspaper4k==0.9.2
 fake-useragent==1.4.0
 feedparser==6.0.10
@@ -798,350 +783,558 @@ python-multipart==0.0.6
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
+pydantic==2.5.0
 EOF
     
     # Tạo file main.py cho FastAPI
     cat << 'EOF' > $N8N_DIR/fastapi/main.py
-from fastapi import FastAPI, HTTPException, Depends, Query
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import HTMLResponse
-import newspaper
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+import logging
+from datetime import datetime
+from typing import Optional
 from fake_useragent import UserAgent
 import feedparser
 import requests
-from typing import List, Optional
-import os
-import logging
+
+from fastapi import FastAPI, HTTPException, Depends, Security, Query
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import HTMLResponse
+import newspaper
+from newspaper import Article
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Cấu hình
+API_TOKEN = os.getenv("API_TOKEN", "your-secret-token-here")
+
+# FastAPI app
 app = FastAPI(
-    title="News Content API",
-    description="API để lấy nội dung tin tức với newspaper4k",
-    version="1.0.0"
+    title="📰 News Content API by Kalvin Thien",
+    description="API lấy nội dung tin tức sử dụng Newspaper4k - Phát triển bởi Nguyễn Ngọc Thiện",
+    version="2.0.0",
+    docs_url=None,  # Tắt docs mặc định
+    redoc_url=None
 )
 
 # Security
 security = HTTPBearer()
-API_TOKEN = os.getenv("API_TOKEN", "your_secure_api_token_here_2025")
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+# Authentication với logging chi tiết
+async def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    logger.info(f"Received token: {credentials.credentials[:10]}...")
+    logger.info(f"Expected token: {API_TOKEN[:10]}...")
+    
     if credentials.credentials != API_TOKEN:
+        logger.error("Token authentication failed")
         raise HTTPException(status_code=401, detail="Invalid API token")
+    
+    logger.info("Token authentication successful")
     return credentials.credentials
 
 # User agent
 ua = UserAgent()
 
+# Routes
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    return """
+async def home():
+    return f"""
     <!DOCTYPE html>
     <html lang="vi">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>📰 News Content API - Nguyễn Ngọc Thiện</title>
+        <title>📰 News Content API - Kalvin Thien Social</title>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
-            * {
+            :root {{
+                --primary: #2563eb;
+                --primary-dark: #1d4ed8;
+                --secondary: #64748b;
+                --accent: #f59e0b;
+                --background: #ffffff;
+                --surface: #f8fafc;
+                --text-primary: #0f172a;
+                --text-secondary: #475569;
+                --border: #e2e8f0;
+                --success: #10b981;
+                --warning: #f59e0b;
+                --error: #ef4444;
+            }}
+            
+            * {{
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
-            }
+            }}
             
-            body {
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6;
-                color: #333;
+            body {{
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 min-height: 100vh;
-                padding: 20px;
-            }
+                color: var(--text-primary);
+                line-height: 1.6;
+            }}
             
-            .container {
-                max-width: 1000px;
+            .container {{
+                max-width: 1200px;
                 margin: 0 auto;
-                background: rgba(255, 255, 255, 0.95);
-                border-radius: 20px;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-                overflow: hidden;
-            }
+                padding: 20px;
+            }}
             
-            .header {
-                background: linear-gradient(45deg, #2196F3, #21CBF3);
-                color: white;
+            .header {{
+                background: var(--background);
+                border-radius: 20px;
                 padding: 40px;
                 text-align: center;
-                position: relative;
-                overflow: hidden;
-            }
-            
-            .header::before {
-                content: '';
-                position: absolute;
-                top: -50%;
-                left: -50%;
-                width: 200%;
-                height: 200%;
-                background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="2" fill="rgba(255,255,255,0.1)"/></svg>') repeat;
-                animation: float 20s linear infinite;
-            }
-            
-            @keyframes float {
-                0% { transform: translate(-50%, -50%) rotate(0deg); }
-                100% { transform: translate(-50%, -50%) rotate(360deg); }
-            }
-            
-            .header h1 {
-                font-size: 2.5em;
-                margin-bottom: 10px;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .header p {
-                font-size: 1.2em;
-                opacity: 0.9;
-                position: relative;
-                z-index: 1;
-            }
-            
-            .content {
-                padding: 40px;
-            }
-            
-            .section {
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
                 margin-bottom: 30px;
-                padding: 25px;
-                background: #f8f9fa;
-                border-radius: 15px;
-                border-left: 5px solid #2196F3;
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
-            }
+                backdrop-filter: blur(10px);
+            }}
             
-            .section:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-            }
-            
-            .section h3 {
-                color: #2196F3;
+            .header h1 {{
+                font-size: 3rem;
+                font-weight: 700;
+                background: linear-gradient(135deg, var(--primary), var(--accent));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
                 margin-bottom: 15px;
-                font-size: 1.4em;
+            }}
+            
+            .header p {{
+                font-size: 1.2rem;
+                color: var(--text-secondary);
+                margin-bottom: 20px;
+            }}
+            
+            .author-info {{
+                background: var(--surface);
+                border-radius: 15px;
+                padding: 20px;
+                margin-bottom: 20px;
+                border: 1px solid var(--border);
+            }}
+            
+            .author-info h3 {{
+                color: var(--primary);
+                margin-bottom: 15px;
+                font-size: 1.3rem;
+            }}
+            
+            .social-links {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 15px;
+                margin-top: 15px;
+            }}
+            
+            .social-link {{
+                display: flex;
+                align-items: center;
+                padding: 12px 16px;
+                background: var(--background);
+                border-radius: 10px;
+                text-decoration: none;
+                color: var(--text-primary);
+                border: 1px solid var(--border);
+                transition: all 0.3s ease;
+            }}
+            
+            .social-link:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+                border-color: var(--primary);
+            }}
+            
+            .social-link .icon {{
+                margin-right: 10px;
+                font-size: 1.2rem;
+            }}
+            
+            .api-section {{
+                background: var(--background);
+                border-radius: 20px;
+                padding: 30px;
+                margin-bottom: 30px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            }}
+            
+            .api-section h2 {{
+                color: var(--primary);
+                margin-bottom: 20px;
+                font-size: 1.8rem;
                 display: flex;
                 align-items: center;
                 gap: 10px;
-            }
+            }}
             
-            .endpoint {
-                background: white;
-                padding: 20px;
-                margin: 15px 0;
-                border-radius: 10px;
-                border: 1px solid #e0e0e0;
-                transition: all 0.3s ease;
-            }
+            .auth-box {{
+                background: linear-gradient(135deg, #fef3c7, #fde68a);
+                border-radius: 15px;
+                padding: 25px;
+                border-left: 4px solid var(--warning);
+                margin-bottom: 25px;
+            }}
             
-            .endpoint:hover {
-                border-color: #2196F3;
-                box-shadow: 0 5px 15px rgba(33, 150, 243, 0.1);
-            }
+            .auth-box h3 {{
+                color: #92400e;
+                margin-bottom: 15px;
+            }}
             
-            .method {
-                display: inline-block;
-                padding: 5px 12px;
-                border-radius: 20px;
-                font-weight: bold;
-                font-size: 0.9em;
-                margin-right: 10px;
-            }
-            
-            .get { background: #4CAF50; color: white; }
-            .post { background: #FF9800; color: white; }
-            
-            code {
-                background: #f5f5f5;
-                padding: 3px 8px;
-                border-radius: 5px;
-                font-family: 'Courier New', monospace;
-                color: #e91e63;
-                font-weight: bold;
-            }
-            
-            .curl-example {
-                background: #263238;
-                color: #00e676;
+            .code-block {{
+                background: #1e293b;
+                color: #e2e8f0;
                 padding: 20px;
                 border-radius: 10px;
-                font-family: 'Courier New', monospace;
-                font-size: 0.9em;
+                font-family: 'Fira Code', monospace;
+                font-size: 0.9rem;
                 overflow-x: auto;
                 margin: 15px 0;
-                white-space: pre-wrap;
-                word-break: break-all;
-            }
+                border: 1px solid #374151;
+            }}
             
-            .author-info {
-                background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
-                color: white;
-                padding: 30px;
+            .endpoints-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin-top: 25px;
+            }}
+            
+            .endpoint-card {{
+                background: var(--surface);
                 border-radius: 15px;
-                text-align: center;
-                margin-top: 30px;
-            }
-            
-            .author-info h3 {
-                color: white;
-                margin-bottom: 15px;
-            }
-            
-            .social-links {
-                display: flex;
-                justify-content: center;
-                gap: 15px;
-                flex-wrap: wrap;
-                margin-top: 20px;
-            }
-            
-            .social-link {
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                padding: 10px 20px;
-                border-radius: 25px;
-                text-decoration: none;
+                padding: 25px;
+                border: 1px solid var(--border);
                 transition: all 0.3s ease;
-                font-weight: bold;
-            }
+            }}
             
-            .social-link:hover {
-                background: rgba(255, 255, 255, 0.3);
-                transform: translateY(-2px);
-            }
+            .endpoint-card:hover {{
+                transform: translateY(-5px);
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+                border-color: var(--primary);
+            }}
             
-            .footer {
+            .endpoint-card h4 {{
+                color: var(--primary);
+                margin-bottom: 10px;
+                font-size: 1.2rem;
+            }}
+            
+            .method-badge {{
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 600;
+                margin-bottom: 10px;
+            }}
+            
+            .method-get {{
+                background: #dcfce7;
+                color: #166534;
+            }}
+            
+            .method-post {{
+                background: #dbeafe;
+                color: #1e40af;
+            }}
+            
+            .example-section {{
+                background: var(--background);
+                border-radius: 20px;
+                padding: 30px;
+                margin-bottom: 30px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            }}
+            
+            .curl-example {{
+                background: #0f172a;
+                color: #e2e8f0;
+                padding: 25px;
+                border-radius: 15px;
+                font-family: 'Fira Code', monospace;
+                font-size: 0.9rem;
+                overflow-x: auto;
+                margin: 20px 0;
+                border: 1px solid #1e293b;
+            }}
+            
+            .curl-example .comment {{
+                color: #64748b;
+            }}
+            
+            .curl-example .string {{
+                color: #10b981;
+            }}
+            
+            .curl-example .flag {{
+                color: #f59e0b;
+            }}
+            
+            .footer {{
                 text-align: center;
-                padding: 20px;
-                background: #f8f9fa;
-                color: #666;
-                font-size: 0.9em;
-            }
+                padding: 40px 20px;
+                color: var(--background);
+                font-size: 0.9rem;
+            }}
             
-            @media (max-width: 768px) {
-                .container { margin: 10px; }
-                .header { padding: 20px; }
-                .header h1 { font-size: 2em; }
-                .content { padding: 20px; }
-                .social-links { flex-direction: column; align-items: center; }
-            }
+            .footer a {{
+                color: var(--background);
+                text-decoration: none;
+                font-weight: 500;
+            }}
+            
+            .footer a:hover {{
+                text-decoration: underline;
+            }}
+            
+            .status-badge {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 16px;
+                background: #dcfce7;
+                color: #166534;
+                border-radius: 20px;
+                font-size: 0.9rem;
+                font-weight: 500;
+                margin-top: 10px;
+            }}
+            
+            .token-display {{
+                background: #fef3c7;
+                border: 2px dashed #f59e0b;
+                border-radius: 10px;
+                padding: 15px;
+                margin: 15px 0;
+                text-align: center;
+                font-family: 'Fira Code', monospace;
+                font-weight: 600;
+                color: #92400e;
+            }}
+            
+            @media (max-width: 768px) {{
+                .header h1 {{
+                    font-size: 2rem;
+                }}
+                
+                .container {{
+                    padding: 15px;
+                }}
+                
+                .social-links {{
+                    grid-template-columns: 1fr;
+                }}
+            }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
                 <h1>📰 News Content API</h1>
-                <p>API lấy nội dung tin tức với newspaper4k - Phiên bản 2025</p>
+                <p>API lấy nội dung tin tức chuyên nghiệp với Newspaper4k</p>
+                <div class="status-badge">
+                    <span>🟢</span>
+                    <span>API đang hoạt động - Version 2.0.0</span>
+                </div>
             </div>
             
-            <div class="content">
-                <div class="section">
-                    <h3>🔐 Xác thực API</h3>
-                    <p>Tất cả endpoints yêu cầu Bearer Token trong header:</p>
-                    <div class="curl-example">Authorization: Bearer YOUR_TOKEN_HERE</div>
-                </div>
+            <div class="author-info">
+                <h3>👨‍💻 Thông Tin Tác Giả</h3>
+                <p><strong>Nguyễn Ngọc Thiện</strong> - Chuyên gia N8N & Automation</p>
                 
-                <div class="section">
-                    <h3>📡 API Endpoints</h3>
-                    
-                    <div class="endpoint">
-                        <span class="method get">GET</span><code>/health</code>
-                        <p>Kiểm tra trạng thái API</p>
+                <div class="social-links">
+                    <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" class="social-link" target="_blank">
+                        <span class="icon">📺</span>
+                        <div>
+                            <strong>YouTube: Kalvin Thien Social</strong><br>
+                            <small>HẢY ĐĂNG KÝ ĐỂ ỦNG HỘ!</small>
+                        </div>
+                    </a>
+                    <a href="https://www.facebook.com/Ban.Thien.Handsome/" class="social-link" target="_blank">
+                        <span class="icon">📘</span>
+                        <div>
+                            <strong>Facebook</strong><br>
+                            <small>Ban Thien Handsome</small>
+                        </div>
+                    </a>
+                    <a href="tel:0888884749" class="social-link">
+                        <span class="icon">📱</span>
+                        <div>
+                            <strong>Zalo/Phone</strong><br>
+                            <small>08.8888.4749</small>
+                        </div>
+                    </a>
+                    <a href="https://www.youtube.com/@kalvinthiensocial/playlists" class="social-link" target="_blank">
+                        <span class="icon">🎬</span>
+                        <div>
+                            <strong>N8N Tutorials</strong><br>
+                            <small>Playlist chuyên sâu</small>
+                        </div>
+                    </a>
+                </div>
+            </div>
+            
+            <div class="api-section">
+                <h2>🔐 Xác Thực API</h2>
+                <div class="auth-box">
+                    <h3>⚠️ Quan trọng: Bearer Token</h3>
+                    <p>Tất cả các API endpoints yêu cầu Bearer Token trong header Authorization:</p>
+                    <div class="code-block">Authorization: Bearer YOUR_TOKEN</div>
+                    <div class="token-display">
+                        Bearer Token hiện tại: {API_TOKEN}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="api-section">
+                <h2>🚀 API Endpoints</h2>
+                <div class="endpoints-grid">
+                    <div class="endpoint-card">
+                        <span class="method-badge method-get">GET</span>
+                        <h4>/health</h4>
+                        <p>Kiểm tra trạng thái hoạt động của API</p>
                     </div>
                     
-                    <div class="endpoint">
-                        <span class="method get">GET</span><code>/article</code>
-                        <p>Lấy nội dung bài viết từ URL</p>
-                        <p><strong>Params:</strong> url (required)</p>
+                    <div class="endpoint-card">
+                        <span class="method-badge method-get">GET</span>
+                        <h4>/article</h4>
+                        <p>Lấy nội dung chi tiết của một bài viết từ URL</p>
                     </div>
                     
-                    <div class="endpoint">
-                        <span class="method get">GET</span><code>/feed</code>
+                    <div class="endpoint-card">
+                        <span class="method-badge method-get">GET</span>
+                        <h4>/feed</h4>
                         <p>Crawl nhiều bài viết từ RSS feed</p>
-                        <p><strong>Params:</strong> url (required), limit (optional, default=10)</p>
                     </div>
                     
-                    <div class="endpoint">
-                        <span class="method get">GET</span><code>/docs</code>
-                        <p>Trang tài liệu này</p>
-                    </div>
-                </div>
-                
-                <div class="section">
-                    <h3>💻 Ví dụ sử dụng với cURL</h3>
-                    
-                    <p><strong>1. Lấy nội dung bài viết:</strong></p>
-                    <div class="curl-example">curl -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
-  "https://api.n8nkalvinbot.io.vn/article?url=https://vnexpress.net/sample-article"</div>
-                    
-                    <p><strong>2. Lấy bài viết từ RSS feed:</strong></p>
-                    <div class="curl-example">curl -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
-  "https://api.n8nkalvinbot.io.vn/feed?url=https://vnexpress.net/rss&limit=5"</div>
-                    
-                    <p><strong>3. Kiểm tra trạng thái API:</strong></p>
-                    <div class="curl-example">curl -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
-  "https://api.n8nkalvinbot.io.vn/health"</div>
-                </div>
-                
-                <div class="section">
-                    <h3>🔧 Sử dụng trong N8N</h3>
-                    <p><strong>Cấu hình HTTP Request Node:</strong></p>
-                    <ul style="margin-left: 20px; margin-top: 10px;">
-                        <li>Method: GET</li>
-                        <li>URL: https://api.n8nkalvinbot.io.vn/article</li>
-                        <li>Headers: Authorization = Bearer YOUR_TOKEN_HERE</li>
-                        <li>Query Parameters: url = URL_BAI_VIET</li>
-                    </ul>
-                </div>
-                
-                <div class="author-info">
-                    <h3>👨‍💻 Thông Tin Tác Giả</h3>
-                    <p><strong>Nguyễn Ngọc Thiện</strong></p>
-                    <div class="social-links">
-                        <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" class="social-link" target="_blank">
-                            📺 YouTube
-                        </a>
-                        <a href="https://www.facebook.com/Ban.Thien.Handsome/" class="social-link" target="_blank">
-                            📘 Facebook
-                        </a>
-                        <a href="tel:0888884749" class="social-link">
-                            📱 Zalo/Phone: 08.8888.4749
-                        </a>
-                        <a href="https://www.youtube.com/@kalvinthiensocial/playlists" class="social-link" target="_blank">
-                            🎬 N8N Tutorials
-                        </a>
+                    <div class="endpoint-card">
+                        <span class="method-badge method-get">GET</span>
+                        <h4>/docs</h4>
+                        <p>Tài liệu API tương tác (Swagger UI)</p>
                     </div>
                 </div>
             </div>
             
-            <div class="footer">
-                <p>© 2025 Nguyễn Ngọc Thiện - News Content API v1.0</p>
-                <p>Được tạo với ❤️ cho cộng đồng N8N Việt Nam</p>
+            <div class="example-section">
+                <h2>💡 Ví Dụ Sử Dụng</h2>
+                
+                <h3>1. Kiểm tra trạng thái API:</h3>
+                <div class="curl-example">
+<span class="comment"># Kiểm tra API có hoạt động không</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
+  <span class="string">"https://api.n8nkalvinbot.io.vn/health"</span>
+                </div>
+                
+                <h3>2. Lấy nội dung bài viết:</h3>
+                <div class="curl-example">
+<span class="comment"># Lấy nội dung từ URL bài báo</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
+  <span class="string">"https://api.n8nkalvinbot.io.vn/article?url=https://vnexpress.net/example-article"</span>
+                </div>
+                
+                <h3>3. Crawl RSS feed:</h3>
+                <div class="curl-example">
+<span class="comment"># Lấy 10 bài viết mới nhất từ RSS feed</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
+  <span class="string">"https://api.n8nkalvinbot.io.vn/feed?url=https://vnexpress.net/rss&limit=10"</span>
+                </div>
+                
+                <h3>4. Sử dụng trong N8N:</h3>
+                <div class="curl-example">
+<span class="comment"># Cấu hình HTTP Request node trong N8N:</span>
+<span class="comment"># Method: GET</span>
+<span class="comment"># URL: https://api.n8nkalvinbot.io.vn/article</span>
+<span class="comment"># Headers: Authorization = Bearer {API_TOKEN}</span>
+<span class="comment"># Query Parameters: url = {{$json.article_url}}</span>
+                </div>
             </div>
+            
+            <div class="api-section">
+                <h2>📚 Tài Liệu & Hỗ Trợ</h2>
+                <div class="endpoints-grid">
+                    <div class="endpoint-card">
+                        <h4>📖 API Documentation</h4>
+                        <p>Tài liệu chi tiết với Swagger UI</p>
+                        <a href="/docs" style="color: var(--primary); text-decoration: none; font-weight: 500;">→ Xem docs</a>
+                    </div>
+                    
+                    <div class="endpoint-card">
+                        <h4>🎥 Video Tutorials</h4>
+                        <p>Hướng dẫn sử dụng API trong N8N</p>
+                        <a href="https://www.youtube.com/@kalvinthiensocial/playlists" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: 500;">→ Xem playlist</a>
+                    </div>
+                    
+                    <div class="endpoint-card">
+                        <h4>💬 Hỗ Trợ</h4>
+                        <p>Liên hệ trực tiếp qua Zalo</p>
+                        <a href="tel:0888884749" style="color: var(--primary); text-decoration: none; font-weight: 500;">→ 08.8888.4749</a>
+                    </div>
+                    
+                    <div class="endpoint-card">
+                        <h4>⚙️ Đổi Token</h4>
+                        <p>Hướng dẫn thay đổi Bearer Token</p>
+                        <a href="#change-token" style="color: var(--primary); text-decoration: none; font-weight: 500;">→ Xem hướng dẫn</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 <a href="https://www.youtube.com/@kalvinthiensocial">Kalvin Thien Social</a> - Phát triển bởi Nguyễn Ngọc Thiện</p>
+            <p>🚀 Hãy đăng ký kênh YouTube để ủng hộ tác giả!</p>
         </div>
     </body>
     </html>
     """
 
+@app.get("/docs", response_class=HTMLResponse)
+async def api_docs():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>API Documentation</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.25.0/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.25.0/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({
+                url: '/openapi.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            });
+        </script>
+    </body>
+    </html>
+    """
+
 @app.get("/health")
-async def health_check(token: str = Depends(verify_token)):
-    return {"status": "healthy", "message": "News Content API is running"}
+async def health_check(credentials: HTTPAuthorizationCredentials = Depends(verify_token)):
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0.0",
+        "api_token_status": "valid",
+        "features": ["article_extraction", "rss_parsing", "content_crawling"]
+    }
 
 @app.get("/article")
 async def get_article(
     url: str = Query(..., description="URL của bài viết cần lấy nội dung"),
-    token: str = Depends(verify_token)
+    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
 ):
+    """Lấy nội dung chi tiết của một bài viết từ URL"""
+    
     try:
         # Tạo article object
         article = newspaper.Article(url)
@@ -1159,6 +1352,7 @@ async def get_article(
         
         # Trích xuất thông tin
         result = {
+            "success": True,
             "url": url,
             "title": article.title,
             "text": article.text,
@@ -1168,7 +1362,8 @@ async def get_article(
             "top_image": article.top_image,
             "meta_keywords": article.meta_keywords,
             "meta_description": article.meta_description,
-            "word_count": len(article.text.split()) if article.text else 0
+            "word_count": len(article.text.split()) if article.text else 0,
+            "language": article.meta_lang if hasattr(article, 'meta_lang') else "unknown"
         }
         
         return result
@@ -1178,13 +1373,14 @@ async def get_article(
         raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý bài viết: {str(e)}")
 
 @app.get("/feed")
-async def get_feed_articles(
+async def parse_feed(
     url: str = Query(..., description="URL của RSS feed"),
     limit: int = Query(10, description="Số lượng bài viết tối đa", ge=1, le=50),
-    token: str = Depends(verify_token)
+    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
 ):
+    """Phân tích RSS feed và lấy danh sách bài viết"""
+    
     try:
-        # Parse RSS feed
         feed = feedparser.parse(url)
         
         if not feed.entries:
@@ -1198,372 +1394,110 @@ async def get_feed_articles(
                 break
                 
             try:
-                # Lấy URL bài viết
-                article_url = entry.link
-                
-                # Tạo article object
-                article = newspaper.Article(article_url)
-                
-                # Cấu hình user agent
-                config = newspaper.Config()
-                config.browser_user_agent = ua.random
-                config.request_timeout = 20
-                
-                article.config = config
-                
-                # Download và parse
-                article.download()
-                article.parse()
-                
-                # Thông tin cơ bản từ RSS
                 article_data = {
-                    "url": article_url,
-                    "title": entry.title if hasattr(entry, 'title') else article.title,
-                    "text": article.text[:2000] + "..." if len(article.text) > 2000 else article.text,  # Giới hạn text
-                    "summary": entry.summary if hasattr(entry, 'summary') else "",
-                    "published": entry.published if hasattr(entry, 'published') else None,
-                    "authors": article.authors,
-                    "top_image": article.top_image,
-                    "word_count": len(article.text.split()) if article.text else 0
+                    "title": entry.get("title", ""),
+                    "url": entry.get("link", ""),
+                    "description": entry.get("description", ""),
+                    "published": entry.get("published", ""),
+                    "author": entry.get("author", ""),
+                    "tags": [tag.term for tag in entry.get("tags", [])]
                 }
-                
                 articles.append(article_data)
                 processed += 1
                 
             except Exception as e:
-                logger.warning(f"Error processing article {entry.link}: {str(e)}")
+                logger.warning(f"Error processing entry: {str(e)}")
                 continue
         
         return {
+            "success": True,
             "feed_url": url,
-            "feed_title": feed.feed.title if hasattr(feed.feed, 'title') else "",
-            "total_found": len(feed.entries),
-            "processed": processed,
-            "articles": articles
+            "feed_title": feed.feed.get("title", ""),
+            "feed_description": feed.feed.get("description", ""),
+            "articles": articles,
+            "total_articles": len(articles),
+            "requested_limit": limit
         }
         
     except Exception as e:
         logger.error(f"Error processing feed {url}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý RSS feed: {str(e)}")
 
-@app.get("/docs")
-async def docs():
-    return await root()
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-    try:
-        # Xây dựng nguồn tin
-        source = Source(source_url)
-        source.build()
-        
-        articles_data = []
-        processed = 0
-        
-        for article in source.articles[:max_articles]:
-            if processed >= max_articles:
-                break
-                
-            article_data = safe_extract_content(article.url)
-            if article_data["success"]:
-                articles_data.append(article_data)
-                processed += 1
-        
-        return {
-            "success": True,
-            "source_url": source_url,
-            "total_found": len(source.articles),
-            "processed": processed,
-            "articles": articles_data,
-            "categories": source.category_urls() if hasattr(source, 'category_urls') else []
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "source_url": source_url,
-            "error": str(e),
-            "articles": []
-        }
-
-def parse_rss_feed(feed_url: str, max_articles: int = 20) -> Dict:
-    try:
-        feed = feedparser.parse(feed_url)
-        articles = []
-        
-        for entry in feed.entries[:max_articles]:
-            article_data = {
-                "title": entry.get("title", ""),
-                "url": entry.get("link", ""),
-                "description": entry.get("description", ""),
-                "published": entry.get("published", ""),
-                "author": entry.get("author", ""),
-                "tags": [tag.term for tag in entry.get("tags", [])]
-            }
-            articles.append(article_data)
-        
-        return {
-            "success": True,
-            "feed_url": feed_url,
-            "feed_title": feed.feed.get("title", ""),
-            "feed_description": feed.feed.get("description", ""),
-            "articles": articles,
-            "total_articles": len(articles)
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "feed_url": feed_url,
-            "error": str(e),
-            "articles": []
-        }
-
-# Routes
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return """
-    <html>
-        <head>
-            <title>📰 News Content API</title>
-            <style>
-                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                .header { text-align: center; color: #333; }
-                .api-info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; }
-                .endpoint { background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 5px; }
-                code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>📰 News Content API</h1>
-                <p>API lấy nội dung tin tức sử dụng Newspaper4k</p>
-            </div>
-            
-            <div class="api-info">
-                <h3>🔐 Xác thực</h3>
-                <p>Tất cả API endpoints yêu cầu Bearer Token trong header:</p>
-                <code>Authorization: Bearer YOUR_TOKEN</code>
-            </div>
-            
-            <div class="endpoint">
-                <h4>GET /health</h4>
-                <p>Kiểm tra trạng thái API</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /extract-article</h4>
-                <p>Lấy nội dung chi tiết của một bài viết</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /extract-source</h4>
-                <p>Lấy nhiều bài viết từ một trang tin tức</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /parse-feed</h4>
-                <p>Phân tích RSS feed</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>GET /docs</h4>
-                <p>Tài liệu API chi tiết (Swagger UI)</p>
-            </div>
-            
-            <p style="text-align: center; margin-top: 30px;">
-                <a href="/docs">📚 Xem tài liệu API đầy đủ</a>
-            </p>
-        </body>
-    </html>
-    """
-
-@app.get("/health")
-async def health_check(credentials: HTTPAuthorizationCredentials = Security(security)):
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0",
-        "features": ["article_extraction", "source_crawling", "rss_parsing", "content_monitoring"]
-    }
-
-@app.post("/extract-article")
-async def extract_article(
-    request: ArticleRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
-):
-    """Lấy nội dung chi tiết của một bài viết"""
-    
-    article_data = safe_extract_content(
-        str(request.url),
-        request.language
-    )
-    
-    if not article_data["success"]:
-        raise HTTPException(status_code=400, detail=f"Không thể lấy nội dung: {article_data.get('error')}")
-    
-    # Lọc dữ liệu theo yêu cầu
-    if not request.extract_images:
-        article_data.pop("images", None)
-        article_data.pop("top_image", None)
-    
-    if not request.summarize:
-        article_data.pop("summary", None)
-        article_data.pop("keywords", None)
-    
-    return article_data
-
-@app.post("/extract-source")
-async def extract_source(
-    request: SourceRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
-):
-    """Lấy nhiều bài viết từ một trang tin tức"""
-    
-    source_data = await extract_from_source(
-        str(request.url),
-        request.max_articles
-    )
-    
-    if not source_data["success"]:
-        raise HTTPException(status_code=400, detail=f"Không thể lấy dữ liệu từ nguồn: {source_data.get('error')}")
-    
-    return source_data
-
-@app.post("/parse-feed")
-async def parse_feed(
-    request: FeedRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
-):
-    """Phân tích RSS feed"""
-    
-    feed_data = parse_rss_feed(str(request.url), request.max_articles)
-    
-    if not feed_data["success"]:
-        raise HTTPException(status_code=400, detail=f"Không thể phân tích feed: {feed_data.get('error')}")
-    
-    return feed_data
-
-@app.get("/stats")
-async def get_stats(credentials: HTTPAuthorizationCredentials = Depends(verify_token)):
-    """Thống kê sử dụng API"""
-    return {
-        "total_requests": "N/A",
-        "successful_extractions": "N/A", 
-        "failed_extractions": "N/A",
-        "uptime": "N/A",
-        "note": "Tính năng thống kê sẽ được bổ sung trong phiên bản sau"
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    print(f"🚀 Khởi động News Content API tại http://{API_HOST}:{API_PORT}")
-    print(f"📚 Tài liệu API: http://{API_HOST}:{API_PORT}/docs")
+    print(f"🚀 Khởi động News Content API tại http://0.0.0.0:8000")
+    print(f"📚 Tài liệu API: http://0.0.0.0:8000/docs")
     print(f"🔑 Bearer Token: {API_TOKEN}")
     
     uvicorn.run(
         "main:app",
-        host=API_HOST,
-        port=API_PORT,
+        host="0.0.0.0",
+        port=8000,
         reload=False,
         workers=1
     )
 EOF
 
-    # Tạo script khởi động News API
-    cat << EOF > $N8N_DIR/news_api/start_news_api.sh
-#!/bin/bash
-
-# Cấu hình môi trường
-export NEWS_API_TOKEN="$NEWS_API_TOKEN"
-export NEWS_API_HOST="0.0.0.0"
-export NEWS_API_PORT="8001"
-
-# Khởi động News API
-cd "$N8N_DIR/news_api"
-source venv/bin/activate
-python main.py
-EOF
-
-    # Tạo service systemd cho News API
-    cat << EOF > /etc/systemd/system/news-api.service
-[Unit]
-Description=News Content API Service
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$N8N_DIR/news_api
-Environment=NEWS_API_TOKEN=$NEWS_API_TOKEN
-Environment=NEWS_API_HOST=0.0.0.0
-Environment=NEWS_API_PORT=8001
-ExecStart=$N8N_DIR/news_api/venv/bin/python $N8N_DIR/news_api/main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    # Đặt quyền cho các file
-    chmod +x $N8N_DIR/fastapi/main.py
+    # Lưu token vào file cấu hình
+    echo "API_TOKEN=\"$NEWS_API_TOKEN\"" > $N8N_DIR/fastapi/.env
     
-    # Tạo script thay đổi Bearer Token
-    cat << EOF > $N8N_DIR/change_api_token.sh
+    # Tạo script đổi token
+    cat << 'EOF' > $N8N_DIR/change-api-token.sh
 #!/bin/bash
 
-echo "🔐 THAY ĐỔI BEARER TOKEN CHO NEWS API"
-echo "===================================="
+# Script đổi Bearer Token cho News API
+echo "🔑 SCRIPT ĐỔI BEARER TOKEN CHO NEWS API"
+echo "======================================"
 
-# Kiểm tra docker command
-if ! docker ps &>/dev/null; then
-    DOCKER_COMPOSE_CMD="sudo docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="sudo docker compose"
-    fi
+N8N_DIR="$(dirname "$0")"
+cd "$N8N_DIR"
+
+# Hiển thị token hiện tại
+if [ -f "fastapi/.env" ]; then
+    CURRENT_TOKEN=$(grep "API_TOKEN=" fastapi/.env | cut -d'"' -f2)
+    echo "🔍 Token hiện tại: $CURRENT_TOKEN"
 else
-    DOCKER_COMPOSE_CMD="docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="docker compose"
-    fi
+    echo "⚠️  Không tìm thấy file cấu hình token"
 fi
 
-# Hiển thị token hiện tại (nếu có)
-if [ -f "$N8N_DIR/docker-compose.yml" ]; then
-    CURRENT_TOKEN=\$(grep "API_TOKEN=" "$N8N_DIR/docker-compose.yml" | cut -d'=' -f2)
-    echo "Token hiện tại: \$CURRENT_TOKEN"
-    echo ""
+echo ""
+read -p "Nhập Bearer Token mới (để trống = tạo tự động): " NEW_TOKEN
+
+if [ -z "$NEW_TOKEN" ]; then
+    NEW_TOKEN=$(openssl rand -hex 16)
+    echo "🎲 Token tự động được tạo: $NEW_TOKEN"
 fi
 
-# Nhập token mới
-read -p "Nhập Bearer Token mới: " NEW_TOKEN
+# Cập nhật token
+echo "API_TOKEN=\"$NEW_TOKEN\"" > fastapi/.env
 
-if [ -z "\$NEW_TOKEN" ]; then
-    echo "❌ Token không được để trống!"
+# Cập nhật docker-compose.yml
+if [ -f "docker-compose.yml" ]; then
+    sed -i "s/API_TOKEN=.*/API_TOKEN=$NEW_TOKEN/" docker-compose.yml
+    echo "✅ Đã cập nhật docker-compose.yml"
+fi
+
+# Restart FastAPI container
+echo "🔄 Đang restart FastAPI container..."
+if command -v docker-compose &> /dev/null; then
+    docker-compose restart fastapi
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    docker compose restart fastapi
+else
+    echo "❌ Không tìm thấy docker-compose command"
     exit 1
 fi
 
-# Cập nhật docker-compose.yml
-echo "📝 Cập nhật cấu hình Docker Compose..."
-sed -i "s/API_TOKEN=.*/API_TOKEN=\$NEW_TOKEN/" "$N8N_DIR/docker-compose.yml"
-
-# Restart FastAPI container
-echo "🔄 Khởi động lại FastAPI container..."
-cd "$N8N_DIR"
-\$DOCKER_COMPOSE_CMD restart fastapi
-
-echo "✅ Đã thay đổi Bearer Token thành công!"
-echo "🔑 Token mới: \$NEW_TOKEN"
 echo ""
-echo "📋 Để sử dụng API, hãy dùng token này trong header:"
-echo "Authorization: Bearer \$NEW_TOKEN"
+echo "✅ HOÀN TẤT ĐỔI TOKEN!"
+echo "🔑 Token mới: $NEW_TOKEN"
+echo "🌐 Hãy cập nhật token này trong N8N workflows của bạn"
+echo "📚 Kiểm tra API: https://api.yourdomain.com/health"
 EOF
 
-    chmod +x $N8N_DIR/change_api_token.sh
-
-    echo "✅ News API đã được tạo và cấu hình thành công"
-    echo "🔑 Bearer Token: $NEWS_API_TOKEN"
-    echo "🔧 Thay đổi token: $N8N_DIR/change_api_token.sh"
+    chmod +x $N8N_DIR/change-api-token.sh
+    
+    echo "✅ News API đã được cấu hình thành công"
 fi
 
 # Đặt quyền cho thư mục n8n
@@ -2011,28 +1945,17 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "  - URL API: https://api.${DOMAIN}"
     echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
     echo "  - Bearer Token: $NEWS_API_TOKEN"
-    echo "  - Trạng thái: $NEWS_API_STATUS"
     echo "  - Chức năng: Lấy nội dung tin tức với Newspaper4k"
     echo ""
     echo "  📋 CÁCH SỬ DỤNG NEWS API TRONG N8N:"
     echo "  1. Tạo HTTP Request node trong workflow"
     echo "  2. Method: GET"
     echo "  3. URL: https://api.${DOMAIN}/article"
-    echo "  4. Headers: Authorization = Bearer $NEWS_API_TOKEN"
-    echo "  5. Query Parameters: url = URL_BAI_VIET"
+    echo "  4. Headers: Authorization: Bearer $NEWS_API_TOKEN"
+    echo "  5. Query Parameters: url = {{$json.article_url}}"
     echo ""
-    echo "  💻 VÍ DỤ LỆNH cURL CHI TIẾT:"
-    echo "  # Lấy nội dung bài viết:"
-    echo "  curl -H \"Authorization: Bearer $NEWS_API_TOKEN\" \\"
-    echo "    \"https://api.${DOMAIN}/article?url=https://vnexpress.net/sample-article\""
-    echo ""
-    echo "  # Lấy bài viết từ RSS feed:"
-    echo "  curl -H \"Authorization: Bearer $NEWS_API_TOKEN\" \\"
-    echo "    \"https://api.${DOMAIN}/feed?url=https://vnexpress.net/rss&limit=5\""
-    echo ""
-    echo "  # Kiểm tra trạng thái API:"
-    echo "  curl -H \"Authorization: Bearer $NEWS_API_TOKEN\" \\"
-    echo "    \"https://api.${DOMAIN}/health\""
+    echo "  🔧 ĐỔI BEARER TOKEN:"
+    echo "  - Chạy lệnh: $N8N_DIR/change-api-token.sh"
     echo ""
 fi
 
@@ -2048,15 +1971,14 @@ echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
 echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
 echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
 echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
-echo "  - 💾 Backup thủ công: $N8N_DIR/manual_backup.sh"
-echo "  - 💾 Backup tự động: $N8N_DIR/backup-workflows.sh"
+echo "  - 💾 Backup thủ công: $N8N_DIR/manual-backup.sh"
 echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
 echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - 🔑 Đổi API Token: $N8N_DIR/change_api_token.sh"
     echo "  - 🔄 Restart News API: cd $N8N_DIR && docker-compose restart fastapi"
     echo "  - 📋 Xem logs News API: cd $N8N_DIR && docker-compose logs -f fastapi"
+    echo "  - 🔑 Đổi API Token: $N8N_DIR/change-api-token.sh"
 fi
 echo ""
 
@@ -2106,7 +2028,7 @@ echo ""
 
 echo "👨‍💻 THÔNG TIN TÁC GIẢ:"
 echo "  - Script gốc: Nguyễn Ngọc Thiện"
-echo "  - YouTube: @kalvinthiensocial"
+echo "  - YouTube: @EtoolsAICONTENT"
 echo "  - Phiên bản cải tiến: Tích hợp News API + Telegram Backup"
 echo ""
 echo "======================================================================"
