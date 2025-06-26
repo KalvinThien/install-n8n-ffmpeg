@@ -1,456 +1,253 @@
-# 🚀 Script Cài Đặt N8N Tự Động - Phiên Bản Cải Tiến 2.0
+# 🚀 N8N Advanced Installation Script
 
-## 👨‍💻 Thông Tin Tác Giả
+<div align="center">
 
-**Nguyễn Ngọc Thiện**
-- 📺 **YouTube**: [Kalvin Thien Social](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1) - **HẢY ĐĂNG KÝ ĐỂ ỦNG HỘ!**
-- 📘 **Facebook**: [Ban Thien Handsome](https://www.facebook.com/Ban.Thien.Handsome/)
-- 📱 **Zalo/Phone**: 08.8888.4749
-- 🎬 **N8N Playlist**: [N8N Tutorials](https://www.youtube.com/@kalvinthiensocial/playlists)
+![N8N Logo](https://n8n.io/favicon.ico) 
 
----
+[![Bash Script](https://img.shields.io/badge/bash-script-brightgreen.svg)](https://www.gnu.org/software/bash/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
+[![N8N](https://img.shields.io/badge/N8N-Workflow%20Automation-orange.svg)](https://n8n.io/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## ⭐ Tính Năng Mới Trong Phiên Bản 2.0
+**Cài đặt N8N chuyên nghiệp với FFmpeg, yt-dlp, Puppeteer, SSL tự động và Backup Telegram nâng cao**
 
-### 🔥 Cải Tiến Chính
-- ✅ **Sửa lỗi backup tự động** - Backup workflow và credentials hoạt động 100%
-- ✅ **Telegram Bot Integration** - Tự động gửi backup qua Telegram hàng ngày
-- ✅ **FastAPI Article Extractor** - API lấy nội dung bài viết từ URL bất kỳ
-- ✅ **Improved UI/UX** - Giao diện đẹp với emoji và màu sắc
-- ✅ **Better Error Handling** - Xử lý lỗi thông minh, không dừng cài đặt
-- ✅ **Detailed Logging** - Log chi tiết mọi hoạt động
+</div>
 
-### 🛠️ Tính Năng Kỹ Thuật
-- 🐳 **Docker Compose v2** support
-- 🔄 **Smart Backup System** với nén .tar.gz
-- 📱 **Telegram Notifications** cho backup và update
-- ⚡ **FastAPI + Newspaper4k** cho việc trích xuất nội dung
-- 🎯 **Random User-Agent** chống block website
-- 🔐 **Bearer Token Authentication** bảo mật API
-- 📊 **Status Monitoring Scripts** kiểm tra trạng thái hệ thống
+## ✨ Tổng quan
 
----
+Script cài đặt nâng cao này giúp bạn triển khai N8N - nền tảng tự động hóa workflow mạnh mẽ - với đầy đủ các công cụ tiện ích như FFmpeg, yt-dlp, và Puppeteer. Script đã được tối ưu để vận hành mượt mà trên các phiên bản Ubuntu mới nhất, tự động cấu hình SSL với Caddy, và nay được tăng cường với **hệ thống backup tin cậy hơn cùng tùy chọn gửi thông báo và file backup qua Telegram**.
 
-## 🚀 Cài Đặt Nhanh
 
-### Yêu Cầu Hệ Thống
-- Ubuntu 20.04+ hoặc Debian 11+
-- RAM: Tối thiểu 2GB (khuyến nghị 4GB+)
-- Disk: Tối thiểu 20GB
-- Domain đã trỏ về IP server
+![Terminal Preview](https://raw.githubusercontent.com/n8n-io/n8n/master/assets/n8n-screenshot.png)
 
-### Lệnh Cài Đặt Một Dòng
+## 🔥 Tính năng
+
+- 🛠️ **Cài đặt tự động** N8N với Docker và Docker Compose.
+- 🚀 **Ưu tiên cài đặt nhanh**: Cung cấp lệnh cài đặt nhanh chóng và tiện lợi.
+- 🔒 **SSL tự động** với Caddy (không cần cấu hình thủ công!).
+- 🎬 **FFmpeg tích hợp** cho xử lý media.
+- 📹 **yt-dlp** cho tải video từ YouTube và nhiều nền tảng khác.
+- 🌐 **Puppeteer** cho tự động hóa trình duyệt web.
+- 💾 **Backup tự động hàng ngày (đã cải tiến)**: Sao lưu toàn bộ workflow và credentials (database, encryption key) một cách đáng tin cậy.
+- 📲 **Thông báo và gửi backup qua Telegram (MỚI)**: Tùy chọn cấu hình để nhận thông báo và file backup (nếu <20MB) trực tiếp qua Telegram, kèm hướng dẫn cấu hình chi tiết.
+- 🔄 **Cập nhật tự động** N8N và các thành phần (bao gồm cả việc chạy backup trước khi cập nhật).
+- 📊 **Tự động cấu hình swap** dựa trên RAM của máy chủ.
+- 🇻🇳 **Giao diện tiếng Việt hoàn chỉnh**: Tất cả thông báo và hướng dẫn trong quá trình cài đặt đều bằng tiếng Việt.
+- ⚠️ **Xử lý lỗi thông minh** và reporting.
+- 🔍 **Kiểm tra và xác minh domain** tự động.
+- 📦 **Nén file backup**: Các file backup giờ đây được nén dưới dạng `.tar.gz` để tiết kiệm dung lượng.
+- 📜 **Log chi tiết**: Ghi log đầy đủ cho quá trình backup và cập nhật.
+
+## 💻 Yêu cầu
+
+- Ubuntu 20.04 LTS hoặc mới hơn.
+- Ít nhất 1GB RAM (khuyến nghị 2GB hoặc cao hơn).
+- Tên miền trỏ về địa chỉ IP của máy chủ.
+- Quyền sudo/root.
+- Kết nối internet (cần thiết cho việc tải gói, Docker images và gửi thông báo Telegram).
+- Các gói tiện ích: `curl`, `dig`, `cron`, `jq`, `tar`, `gzip`, `bc` (script sẽ cố gắng tự cài đặt nếu thiếu).
+
+## 📋 Hướng dẫn cài đặt
+
+### 🚀 Cài đặt nhanh (Khuyến nghị)
+
+Sao chép và chạy lệnh sau trực tiếp trên terminal của server:
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh | sudo bash
+cd /tmp && curl -sSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh | tr -d '\r' > install_n8n.sh && chmod +x install_n8n.sh && sudo bash install_n8n.sh
 ```
+*Lưu ý: Thay thế URL `https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh` bằng URL thực tế của file script `n8n_install_updated.sh` nếu bạn lưu trữ ở nơi khác.*
 
-### Hoặc Tải Về và Chạy
+### Cài đặt thủ công
+
+Nếu bạn muốn tải script về máy trước:
+
 ```bash
-wget https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/refs/heads/main/auto_cai_dat_n8n.sh
-chmod +x auto_cai_dat_n8n.sh
-sudo ./auto_cai_dat_n8n.sh
+# Tải script (ví dụ, đặt tên là n8n_install_updated.sh)
+# wget -O n8n_install_updated.sh <URL_TO_YOUR_UPDATED_SCRIPT>
+
+# Cấp quyền thực thi
+chmod +x n8n_install_updated.sh
+
+# Chạy script
+sudo ./n8n_install_updated.sh
 ```
 
----
+Trong quá trình cài đặt, bạn sẽ được hỏi:
+- Tên miền của bạn.
+- Có muốn cấu hình gửi backup qua Telegram không. 
 
-## 🎛️ Tùy Chọn Cài Đặt
+### Tùy chọn nâng cao khi chạy script
 
-### Tham Số Dòng Lệnh
 ```bash
-# Hiển thị trợ giúp
-sudo ./auto_cai_dat_n8n.sh --help
+# Chỉ định thư mục cài đặt khác (ví dụ: /opt/n8n)
+sudo ./n8n_install_updated.sh -d /opt/n8n
 
-# Chỉ định thư mục cài đặt
-sudo ./auto_cai_dat_n8n.sh --dir /opt/n8n
+# Bỏ qua cài đặt Docker (nếu Docker và Docker Compose đã được cài đặt từ trước)
+sudo ./n8n_install_updated.sh -s
 
-# Bỏ qua cài đặt Docker (nếu đã có)
-sudo ./auto_cai_dat_n8n.sh --skip-docker
-
-# Kích hoạt Telegram backup
-sudo ./auto_cai_dat_n8n.sh --enable-telegram
-
-# Kích hoạt FastAPI
-sudo ./auto_cai_dat_n8n.sh --enable-fastapi
-
-# Kết hợp nhiều tùy chọn
-sudo ./auto_cai_dat_n8n.sh --dir /opt/n8n --enable-telegram --enable-fastapi
+# Xem trợ giúp
+sudo ./n8n_install_updated.sh -h
 ```
 
----
+### Hướng dẫn cấu hình gửi Backup qua Telegram
 
-## 📱 Cấu Hình Telegram Bot (Tùy Chọn)
+Nếu bạn chọn **Có (y)** khi được hỏi về việc cấu hình gửi backup qua Telegram, script sẽ yêu cầu bạn cung cấp hai thông tin:
 
-### Bước 1: Tạo Bot
-1. Mở Telegram, tìm `@BotFather`
-2. Gửi `/newbot`
-3. Đặt tên cho bot của bạn
-4. Lưu `Bot Token`
+1.  **Telegram Bot Token**:
+    *   Đây là một chuỗi ký tự duy nhất dùng để xác thực bot của bạn.
+    *   **Cách lấy**: 
+        1.  Mở Telegram, tìm kiếm `BotFather` (bot chính thức của Telegram để tạo và quản lý bot).
+        2.  Bắt đầu chat với BotFather bằng cách gõ lệnh `/start`.
+        3.  Gõ lệnh `/newbot` để tạo một bot mới.
+        4.  Làm theo hướng dẫn của BotFather: đặt tên cho bot (ví dụ: `N8N Backup Bot`), sau đó đặt username cho bot (phải kết thúc bằng `bot`, ví dụ: `MyN8NBackup_bot`).
+        5.  Sau khi tạo thành công, BotFather sẽ cung cấp cho bạn một **HTTP API token**. Đây chính là `TELEGRAM_BOT_TOKEN` bạn cần. Hãy sao chép và lưu lại cẩn thận.
 
-### Bước 2: Lấy Chat ID
-1. Gửi tin nhắn cho bot vừa tạo
-2. Truy cập: `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`
-3. Tìm `chat.id` trong response
+2.  **Telegram Chat ID**:
+    *   Đây là ID của cuộc trò chuyện (cá nhân hoặc nhóm) mà bot sẽ gửi thông báo và file backup đến.
+    *   **Cách lấy Chat ID cá nhân của bạn**:
+        1.  Mở Telegram, tìm kiếm bot `@userinfobot`.
+        2.  Bắt đầu chat với `@userinfobot` bằng cách gõ lệnh `/start`.
+        3.  Bot sẽ trả về thông tin người dùng của bạn, bao gồm cả `Id`. Đây chính là `TELEGRAM_CHAT_ID` của bạn.
+    *   **Cách lấy Chat ID của một Group**:
+        1.  Thêm bot bạn vừa tạo ở bước 1 vào group Telegram mà bạn muốn nhận backup.
+        2.  Gửi một tin nhắn bất kỳ vào group đó.
+        3.  Cách đơn giản nhất để lấy Group ID là sử dụng một bot khác như `@RawDataBot` hoặc `@get_id_bot`. Thêm một trong các bot này vào group, nó sẽ hiển thị thông tin JSON của tin nhắn, trong đó có `chat` -> `id`. Group ID thường là một số âm (ví dụ: `-1001234567890`).
+        4.  Hoặc, bạn có thể gửi lệnh `/my_id @TenBotCuaBan` (thay `@TenBotCuaBan` bằng username của bot bạn đã tạo) vào group. Một số bot (như `@userinfobot` nếu được thêm vào group) có thể phản hồi với ID của group.
 
-### Bước 3: Cấu Hình
-Khi chạy script, chọn `y` cho tùy chọn Telegram và nhập:
-- Bot Token
-- Chat ID
+Sau khi nhập hai thông tin này, script sẽ lưu chúng vào file `$N8N_DIR/telegram_backup.conf` và sử dụng để gửi backup tự động.
 
-### Tính Năng Telegram
-- 📦 Tự động gửi backup hàng ngày
-- 🔄 Thông báo khi có update N8N
-- ⚠️ Cảnh báo khi có lỗi backup
-- 📊 File backup nhỏ hơn 50MB sẽ được gửi trực tiếp
-
----
-
-## ⚡ FastAPI Article Extractor
-
-### Tính Năng
-- 🎯 Trích xuất tiêu đề, nội dung, tác giả từ bất kỳ URL nào
-- 🤖 Tóm tắt tự động bằng AI
-- 🔤 Trích xuất từ khóa quan trọng
-- 🌐 Hỗ trợ đa ngôn ngữ (Việt, Anh, ...)
-- 🎭 Random User-Agent chống block
-- 🔒 Bearer Token authentication
-- 📚 Swagger UI documentation
-
-### API Endpoints
-```
-GET  /                    # Trang chủ với hướng dẫn
-POST /extract             # Trích xuất 1 URL
-POST /extract/batch       # Trích xuất nhiều URL (max 10)
-GET  /health              # Health check
-GET  /stats               # Thống kê API
-GET  /docs                # Swagger documentation
-GET  /redoc               # ReDoc documentation
-```
-
-### Sử Dụng Với N8N
-1. Thêm **HTTP Request** node
-2. **URL**: `https://api.yourdomain.com/extract`
-3. **Method**: `POST`
-4. **Headers**: 
-   ```
-   Authorization: Bearer YOUR_PASSWORD
-   Content-Type: application/json
-   ```
-5. **Body**:
-   ```json
-   {
-     "url": "https://vnexpress.net/sample-article",
-     "language": "vi"
-   }
-   ```
-
-### Response Example
-```json
-{
-  "success": true,
-  "url": "https://vnexpress.net/sample-article",
-  "title": "Tiêu đề bài viết",
-  "text": "Nội dung đầy đủ của bài viết...",
-  "summary": "Tóm tắt tự động...",
-  "authors": ["Tác giả 1", "Tác giả 2"],
-  "publish_date": "2024-01-15T10:30:00",
-  "keywords": ["từ khóa 1", "từ khóa 2"],
-  "processing_time": 2.34
-}
-```
-
----
-
-## 💾 Hệ Thống Backup Cải Tiến
-
-### Tính Năng Backup
-- ✅ **Tự động hàng ngày** lúc 2:00 sáng
-- ✅ **Backup toàn bộ workflows** (từng file riêng + file tổng hợp)
-- ✅ **Backup credentials** (database.sqlite, encryptionKey, config)
-- ✅ **Nén .tar.gz** tiết kiệm dung lượng
-- ✅ **Giữ 30 backup gần nhất** tự động xóa cũ
-- ✅ **Log chi tiết** mọi hoạt động
-- ✅ **Gửi qua Telegram** (nếu được kích hoạt)
-
-### Thư Mục Backup
-```
-/home/n8n/files/backup_full/
-├── n8n_backup_20240115_020000.tar.gz
-├── n8n_backup_20240114_020000.tar.gz
-├── ...
-└── backup.log
-```
-
-### Chạy Backup Thủ Công
-```bash
-cd /home/n8n
-./backup-workflows.sh
-```
-
-### Kiểm Tra Log Backup
-```bash
-tail -f /home/n8n/files/backup_full/backup.log
-```
-
----
-
-## 🔄 Hệ Thống Cập Nhật Tự Động
-
-### Tính Năng Update
-- 🔄 **Kiểm tra mỗi 12 giờ** image N8N mới
-- 📦 **Tự động backup** trước khi update  
-- 🚀 **Build và restart** container khi có update
-- 📱 **Thông báo Telegram** khi có update
-- 📺 **Cập nhật yt-dlp** định kỳ
-
-### Chạy Update Thủ Công
-```bash
-cd /home/n8n
-./update-n8n.sh
-```
-
-### Kiểm Tra Log Update
-```bash
-tail -f /home/n8n/update.log
-```
-
----
-
-## 📊 Monitoring & Maintenance
-
-### Script Kiểm Tra Trạng Thái
-```bash
-cd /home/n8n
-./check-status.sh
-```
-
-### Xem Logs Container
-```bash
-cd /home/n8n
-
-# Xem log N8N
-docker-compose logs -f n8n
-
-# Xem log Caddy
-docker-compose logs -f caddy
-
-# Xem log FastAPI (nếu có)
-docker-compose logs -f fastapi
-
-# Xem tất cả logs
-docker-compose logs -f
-```
-
-### Restart Services
-```bash
-cd /home/n8n
-
-# Restart toàn bộ
-docker-compose restart
-
-# Restart riêng lẻ
-docker-compose restart n8n
-docker-compose restart caddy
-docker-compose restart fastapi
-```
-
----
-
-## 🏗️ Cấu Trúc Thư Mục
+## 🔧 Cấu trúc thư mục (ví dụ với thư mục cài đặt mặc định `/home/n8n`)
 
 ```
 /home/n8n/
-├── 📄 docker-compose.yml          # Cấu hình Docker services
-├── 📄 Dockerfile                  # N8N với FFmpeg, yt-dlp, Puppeteer
-├── 📄 Dockerfile.fastapi          # FastAPI container
-├── 📄 Caddyfile                   # Reverse proxy + SSL
-├── 📄 fastapi_app.py              # Ứng dụng FastAPI
-├── 📄 fastapi_requirements.txt    # Dependencies FastAPI
-├── 📄 telegram_config.conf        # Cấu hình Telegram
-├── 📄 backup-workflows.sh         # Script backup cải tiến
-├── 📄 update-n8n.sh               # Script update tự động
-├── 📄 check-status.sh             # Script kiểm tra trạng thái
-├── 📄 backup.log                  # Log backup
-├── 📄 update.log                  # Log update
-├── 📁 files/                      # Data files
-│   ├── 📁 backup_full/            # Thư mục backup chính
-│   ├── 📁 youtube_content_anylystic/ # Video downloads
-│   └── 📁 temp/                   # Temporary files
-├── 📁 fastapi_logs/               # FastAPI logs
-└── 📁 templates/                  # HTML templates
-    └── index.html                 # FastAPI homepage
+├── Dockerfile                # Dockerfile tùy chỉnh với FFmpeg, yt-dlp và Puppeteer
+├── docker-compose.yml        # Cấu hình Docker Compose
+├── Caddyfile                 # Cấu hình Caddy Server (SSL)
+├── update-n8n.sh             # Script cập nhật tự động N8N
+├── backup-workflows.sh       # Script sao lưu tự động workflows và credentials
+├── telegram_backup.conf      # (TÙY CHỌN) File cấu hình Telegram Bot Token và Chat ID
+├── database.sqlite           # File database của N8N
+├── encryptionKey             # Khóa mã hóa cho credentials của N8N
+└── files/
+    ├── temp/                 # Thư mục tạm thời cho N8N
+    ├── youtube_content_anylystic/ # Nơi lưu video YouTube
+    └── backup_full/          # Nơi lưu trữ các file backup .tar.gz hàng ngày
+        └── backup.log        # Log chi tiết của quá trình backup
 ```
 
----
+## 📌 Sau khi cài đặt
 
-## 🌐 Truy Cập Services
+- Truy cập N8N qua `https://your-domain.com`.
+- **Sao lưu tự động**: Được cấu hình chạy hàng ngày vào lúc 2 giờ sáng.
+    - File backup (ví dụ: `n8n_backup_YYYYMMDD_HHMMSS.tar.gz`) được lưu tại `$N8N_DIR/files/backup_full/`.
+    - Log chi tiết của quá trình backup được lưu tại `$N8N_DIR/files/backup_full/backup.log`.
+    - Nếu bạn đã cấu hình Telegram, thông báo về trạng thái backup và file backup (nếu kích thước < 20MB) sẽ được gửi đến Chat ID đã cung cấp.
+- **Kiểm tra cập nhật tự động**: Diễn ra mỗi 12 giờ.
+    - Log cập nhật được lưu tại `$N8N_DIR/update.log`.
+    - Script sẽ tự động chạy backup trước khi thực hiện cập nhật N8N.
 
-### URLs Mặc Định
-- **N8N**: `https://yourdomain.com`
-- **FastAPI**: `https://api.yourdomain.com`
-- **API Docs**: `https://api.yourdomain.com/docs`
+## ⚙️ Cấu hình Swap tự động 
 
-### Ports (Backup Access)
-- **N8N**: `http://yourdomain.com:5678`
-- **FastAPI**: `http://yourdomain.com:8000`
-- **Caddy Admin**: `http://yourdomain.com:2019`
+Script tự động phân tích RAM trên máy chủ và thiết lập swap tối ưu:
 
----
+| RAM     | Kích thước swap |
+|---------|-----------------|
+| ≤ 2GB   | 2x RAM          |
+| 2GB-8GB | 1x RAM          |
+| > 8GB   | 4GB cố định     |
 
-## 🛠️ Troubleshooting
+Các tham số `vm.swappiness` (đặt thành 10) và `vm.vfs_cache_pressure` (đặt thành 50) được điều chỉnh.
 
-### Lỗi Thường Gặp
+## 🚨 Xử lý sự cố
 
-#### 1. Container không khởi động
-```bash
-# Kiểm tra logs
-cd /home/n8n
-docker-compose logs
+- **Docker không khởi động**: Kiểm tra logs bằng lệnh `cd /path/to/your/n8n_dir && docker compose logs n8n`.
+- **SSL không hoạt động**: Kiểm tra Caddy logs bằng `cd /path/to/your/n8n_dir && docker compose logs caddy`.
+- **Không tải được video YouTube**: Cập nhật yt-dlp trên host. Sau đó, script cập nhật tự động cũng sẽ cập nhật yt-dlp trong container.
+- **Backup không gửi qua Telegram**: 
+    - Kiểm tra file cấu hình `$N8N_DIR/telegram_backup.conf`.
+    - Đảm bảo server có kết nối internet.
+    - Kiểm tra log backup tại `$N8N_DIR/files/backup_full/backup.log`.
+- **Vấn đề khác**: Xem thêm trong các file log hoặc liên hệ hỗ trợ.
 
-# Build lại image
-docker-compose build --no-cache
-docker-compose up -d
-```
+## 📜 Miễn trừ trách nhiệm
 
-#### 2. SSL không hoạt động
-```bash
-# Kiểm tra Caddy logs
-docker-compose logs caddy
+- Script này được cung cấp "NGUYÊN TRẠNG" mà không có bất kỳ bảo đảm nào, dù rõ ràng hay ngụ ý.
+- Người dùng hoàn toàn chịu trách nhiệm về việc sử dụng script này và mọi hậu quả có thể phát sinh.
+- Luôn đảm bảo bạn đã sao lưu dữ liệu quan trọng trước khi chạy bất kỳ script nào có quyền truy cập hệ thống cao.
+- Tác giả không chịu trách nhiệm cho bất kỳ mất mát dữ liệu, gián đoạn dịch vụ hoặc thiệt hại nào khác do việc sử dụng script này gây ra.
+- Vui lòng tự kiểm tra và hiểu rõ script trước khi thực thi trên môi trường production.
 
-# Restart Caddy
-docker-compose restart caddy
-```
+## 👨‍💻 Thông tin và hỗ trợ
 
-#### 3. Backup không gửi được qua Telegram
-```bash
-# Kiểm tra config
-cat /home/n8n/telegram_config.conf
+### Liên hệ
 
-# Test thủ công
-curl -X POST "https://api.telegram.org/bot<BOT_TOKEN>/sendMessage" \
-  -d chat_id="<CHAT_ID>" \
-  -d text="Test message"
-```
+- **Zalo/Phone**: 0888884749
+- **GitHub**: [Github/KalvinThien](https://github.com/KalvinThien)
 
-#### 4. FastAPI không hoạt động
-```bash
-# Kiểm tra logs
-docker-compose logs fastapi
+### Donate
 
-# Restart service
-docker-compose restart fastapi
-```
+Nếu bạn thấy dự án này hữu ích, hãy xem xét hỗ trợ để phát triển thêm tính năng mới:
 
-### Commands Hữu Ích
+- **TP Bank**: 0888884749
+- **Chủ tài khoản**: Nguyễn Ngọc Thiện
 
-```bash
-# Kiểm tra disk space
-df -h
+<div align="center">
+  <img src="https://github.com/KalvinThien/install-n8n-ffmpeg/blob/main/qrcode.png?raw=true" alt="QR Code Donate" width="400" />
+</div>
 
-# Kiểm tra RAM
-free -h
+## 📝 Changelog
 
-# Kiểm tra processes
-ps aux | grep docker
+### v1.4.1 (15/05/2025) - Bản cập nhật hiện tại
+- ✅ **Cải tiến Hướng dẫn & Hoàn thiện Script**:
+    - **Ưu tiên lệnh cài đặt nhanh** trong README.
+    - **Bổ sung hướng dẫn chi tiết** cách lấy Telegram Bot Token và Chat ID.
+    - **Thêm mục Miễn trừ trách nhiệm** vào README.
+    - Sửa các lỗi nhỏ về định dạng Markdown/HTML trong README.
+    - Cập nhật ngày phát hành cho phiên bản này.
+- ✅ **Cải tiến Backup Lớn & Tích hợp Telegram (từ v1.4.0)**:
+    - Sửa lỗi logic và đường dẫn trong script backup (`backup-workflows.sh`) để đảm bảo sao lưu chính xác workflows, database (`database.sqlite`), và encryption key.
+    - File backup được nén dưới dạng `.tar.gz`.
+    - Tùy chọn cấu hình gửi thông báo trạng thái backup và file backup (nếu < 20MB) hàng ngày qua Telegram.
+    - Hướng dẫn chi tiết bằng tiếng Việt trong quá trình cài đặt để cấu hình Telegram.
+    - Cải thiện log chi tiết cho quá trình backup.
+    - Dọn dẹp các bản backup cũ an toàn hơn.
+- 🇻🇳 **Việt hóa hoàn toàn (từ v1.4.0)**: Tất cả các thông báo, câu hỏi trong script cài đặt đều bằng tiếng Việt.
+- 🛠️ **Cải tiến Script Cài đặt (từ v1.4.0)**:
+    - Kiểm tra và cài đặt các gói phụ thuộc mạnh mẽ hơn.
+    - Cải thiện logic kiểm tra và cài đặt Docker & Docker Compose.
+    - Tối ưu hóa quyền truy cập thư mục cho N8N và script backup.
+    - Script cập nhật (`update-n8n.sh`) giờ đây sẽ tự động chạy backup trước khi cập nhật N8N.
 
-# Cleanup Docker
-docker system prune -a
+### v1.3.0 (26/03/2025)
+- ✅ Thêm tính năng tự động cấu hình swap
+- 🔄 Cập nhật cách cài đặt yt-dlp để tương thích với Python mới
+- 🔒 Cập nhật phương pháp thêm khóa GPG cho Docker
+- 🐛 Sửa lỗi trong Dockerfile cho Alpine Linux
 
-# Reset toàn bộ (XÓA DỮ LIỆU!)
-cd /home/n8n
-docker-compose down -v
-docker system prune -a -f
-```
+### v1.2.0 (15/02/2025)
+- ✅ Thêm tích hợp Puppeteer
+- 🔄 Cải thiện hệ thống sao lưu và khôi phục (phiên bản trước khi có sửa lỗi lớn và Telegram)
+- 🔧 Cập nhật cấu hình Docker Compose
 
----
+### v1.1.0 (10/01/2025)
+- ✅ Thêm hỗ trợ FFmpeg và yt-dlp
+- 🔄 Tự động cập nhật N8N
+- 🔒 Tích hợp Caddy cho SSL tự động
 
-## 🔐 Bảo Mật
-
-### Recommendations
-- 🔒 Đổi mật khẩu mặc định của N8N
-- 🔑 Sử dụng mật khẩu mạnh cho FastAPI Bearer Token
-- 🛡️ Cấu hình firewall chỉ mở port cần thiết
-- 📱 Bảo mật Bot Token Telegram
-- 🔄 Cập nhật định kỳ
-
-### Firewall Setup
-```bash
-# Chỉ mở port cần thiết
-ufw allow 22    # SSH
-ufw allow 80    # HTTP
-ufw allow 443   # HTTPS
-ufw enable
-```
-
----
-
-## 🆘 Hỗ Trợ
-
-### Liên Hệ Tác Giả
-- 📞 **Zalo/Phone**: 08.8888.4749
-- 📘 **Facebook**: [Ban Thien Handsome](https://www.facebook.com/Ban.Thien.Handsome/)
-- 🎥 **YouTube**: [Kalvin Thien Social](https://www.youtube.com/@kalvinthiensocial)
-
-### Cách Nhận Hỗ Trợ
-1. 🎥 Xem video hướng dẫn trên YouTube
-2. 💬 Comment dưới video
-3. 📱 Nhắn tin Zalo: 08.8888.4749
-4. 📘 Inbox Facebook
-
-### Đóng Góp & Báo Lỗi
-- 🐛 Báo lỗi qua GitHub Issues
-- 💡 Đề xuất tính năng mới
-- 🤝 Contribute code qua Pull Request
+### v1.0.0 (05/12/2024)
+- 🚀 Phát hành lần đầu
+- ✅ Cài đặt N8N cơ bản với Docker
+- 🔧 Cấu hình cơ bản và hướng dẫn
 
 ---
 
-## 📜 Changelog
+<div align="center">
+  <p>
+    <sub>Script gốc được phát triển bởi Nguyễn Ngọc Thiện</sub><br />
+    <sub>© 2025 Nguyễn Ngọc Thiện - Mọi quyền được bảo lưu</sub>
+  </p>
+  
+  [![Made with Love](https://img.shields.io/badge/Made%20with-❤️-red.svg)](https://github.com/your-username)
+</div>
 
-### Version 2.0.0 (2024-01-15)
-- ✅ Sửa lỗi backup script không hoạt động
-- ✅ Thêm Telegram Bot integration
-- ✅ Thêm FastAPI Article Extractor
-- ✅ Cải thiện UI/UX với emoji và màu sắc
-- ✅ Better error handling
-- ✅ Improved logging system
-- ✅ Docker Compose v2 support
-- ✅ Smart backup với nén .tar.gz
-- ✅ Status monitoring scripts
-
-### Version 1.x
-- ✅ N8N với FFmpeg, yt-dlp, Puppeteer
-- ✅ SSL tự động với Caddy
-- ✅ Docker containerization
-- ✅ Basic backup system
-
----
-
-## 📄 License
-
-Dự án này được phát hành dưới giấy phép MIT. Xem file [LICENSE](LICENSE) để biết thêm chi tiết.
-
----
-
-## 🙏 Cảm Ơn
-
-- 💝 Cảm ơn cộng đồng N8N Việt Nam
-- 🌟 Cảm ơn các subscribers kênh YouTube
-- ❤️ Cảm ơn những người đã test và feedback
-
----
-
-## 🔥 Kêu Gọi Hành Động
-
-### 🎥 ĐĂNG KÝ KÊNH YOUTUBE
-👆 **[CLICK ĐỂ ĐĂNG KÝ](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1)** 👆
-
-### 💝 Chia Sẻ Script
-Nếu script này hữu ích, hãy chia sẻ cho bạn bè!
-
-### 📱 Theo Dõi Updates
-- 🔔 Bật thông báo YouTube để không bỏ lỡ video mới
-- 📘 Follow Facebook để cập nhật script mới
-
----
-
-**Made with ❤️ by Nguyễn Ngọc Thiện**
-*Script phát triển cho cộng đồng N8N Việt Nam* 
