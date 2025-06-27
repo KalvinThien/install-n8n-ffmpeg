@@ -2,7 +2,7 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer, Lấy Nội Dung Bài Viết với API riêng và SSL tự động  "
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer, thêm tính năng api cào bài viết và SSL tự động  "
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -1186,7 +1186,7 @@ async def home():
                     <p>Tất cả các API endpoints yêu cầu Bearer Token trong header Authorization:</p>
                     <div class="code-block">Authorization: Bearer YOUR_TOKEN</div>
                     <div class="token-display">
-                        Bearer Token hiện tại: {API_TOKEN}
+                        Bearer Token hiện tại: [ĐÃ ẨN VÌ LÝ DO BẢO MẬT]
                     </div>
                 </div>
             </div>
@@ -1226,30 +1226,30 @@ async def home():
                 <h3>1. Kiểm tra trạng thái API:</h3>
                 <div class="curl-example">
 <span class="comment"># Kiểm tra API có hoạt động không</span>
-curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
-  <span class="string">"https://api.n8nkalvinbot.io.vn/health"</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer YOUR_TOKEN"</span> \\
+  <span class="string">"https://api.yourdomain.com/health"</span>
                 </div>
                 
                 <h3>2. Lấy nội dung bài viết:</h3>
                 <div class="curl-example">
 <span class="comment"># Lấy nội dung từ URL bài báo</span>
-curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
-  <span class="string">"https://api.n8nkalvinbot.io.vn/article?url=https://vnexpress.net/example-article"</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer YOUR_TOKEN"</span> \\
+  <span class="string">"https://api.yourdomain.com/article?url=https://vnexpress.net/example-article"</span>
                 </div>
                 
                 <h3>3. Crawl RSS feed:</h3>
                 <div class="curl-example">
 <span class="comment"># Lấy 10 bài viết mới nhất từ RSS feed</span>
-curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer {API_TOKEN}"</span> \\
-  <span class="string">"https://api.n8nkalvinbot.io.vn/feed?url=https://vnexpress.net/rss&limit=10"</span>
+curl <span class="flag">-H</span> <span class="string">"Authorization: Bearer YOUR_TOKEN"</span> \\
+  <span class="string">"https://api.yourdomain.com/feed?url=https://vnexpress.net/rss&limit=10"</span>
                 </div>
                 
                 <h3>4. Sử dụng trong N8N:</h3>
                 <div class="curl-example">
 <span class="comment"># Cấu hình HTTP Request node trong N8N:</span>
 <span class="comment"># Method: GET</span>
-<span class="comment"># URL: https://api.n8nkalvinbot.io.vn/article</span>
-<span class="comment"># Headers: Authorization = Bearer {API_TOKEN}</span>
+<span class="comment"># URL: https://api.yourdomain.com/article</span>
+<span class="comment"># Headers: Authorization = Bearer YOUR_TOKEN</span>
 <span class="comment"># Query Parameters: url = {{$json.article_url}}</span>
                 </div>
             </div>
@@ -1492,7 +1492,7 @@ echo ""
 echo "✅ HOÀN TẤT ĐỔI TOKEN!"
 echo "🔑 Token mới: $NEW_TOKEN"
 echo "🌐 Hãy cập nhật token này trong N8N workflows của bạn"
-echo "📚 Kiểm tra API: https://api.yourdomain.com/health"
+echo "📚 Kiểm tra API: https://api.${DOMAIN}/health"
 EOF
 
     chmod +x $N8N_DIR/change-api-token.sh
