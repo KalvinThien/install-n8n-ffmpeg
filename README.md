@@ -124,42 +124,14 @@ Sau khi cài đặt, API sẽ có sẵn tại `https://api.yourdomain.com` với
 ```bash
 # Lấy nội dung bài viết
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "https://api.yourdomain.com/article?url=https://vnexpress.net/sample-article"
+  "https://api.yourdomain.com/article?url=https://example.com/news"
 
 # Crawl nhiều bài viết từ RSS
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "https://api.yourdomain.com/feed?url=https://vnexpress.net/rss&limit=10"
-
-# Kiểm tra trạng thái API
-curl -H "Authorization: Bearer YOUR_TOKEN" \
-  "https://api.yourdomain.com/health"
+  "https://api.yourdomain.com/feed?url=https://example.com/rss&limit=10"
 
 # Xem tài liệu API
 https://api.yourdomain.com/docs
-```
-
-### 🔑 Thay đổi Bearer Token API
-
-Để thay đổi Bearer Token cho News API:
-
-```bash
-# Chạy script thay đổi token
-cd /home/n8n  # hoặc thư mục cài đặt của bạn
-./change_api_token.sh
-```
-
-Hoặc thay đổi thủ công:
-
-```bash
-# Sửa file docker-compose.yml
-nano /home/n8n/docker-compose.yml
-
-# Tìm dòng: API_TOKEN=your_old_token
-# Thay thành: API_TOKEN=your_new_token
-
-# Khởi động lại FastAPI container
-cd /home/n8n
-docker-compose restart fastapi
 ```
 
 ### Hướng dẫn cấu hình gửi Backup qua Telegram
@@ -238,31 +210,76 @@ sudo ./troubleshoot.sh backup   # Kiểm tra Backup
 sudo ./troubleshoot.sh puppeteer # Kiểm tra Puppeteer
 ```
 
-### 💾 Backup và Quản lý
-```bash
-# Backup thủ công (để test tính năng)
-cd /home/n8n
-./manual_backup.sh
-
-# Backup tự động (script chính)
-./backup-workflows.sh
-
-# Thay đổi API Token (nếu có News API)
-./change_api_token.sh
-
-# Xem logs backup
-tail -20 ./files/backup_full/backup.log
-
-# Liệt kê các file backup
-ls -la ./files/backup_full/n8n_backup_*.tar
-```
-
 ### 🐛 Các vấn đề thường gặp
 - **Docker không khởi động**: `docker compose logs n8n`
 - **SSL không hoạt động**: `docker compose logs caddy`
 - **API subdomain lỗi 502**: Kiểm tra DNS và khởi động lại Caddy
 - **Backup không gửi qua Telegram**: Kiểm tra `telegram_backup.conf` và kết nối internet
 - **Puppeteer không hoạt động**: Xem `files/puppeteer_status.txt`
+
+## 🔧 Quản Lý Bearer Token
+
+### Đổi Bearer Token cho News API {#change-token}
+
+Nếu bạn muốn thay đổi Bearer Token cho News API (vì lý do bảo mật hoặc token bị lộ):
+
+```bash
+# Chạy script đổi token tự động
+cd /home/n8n  # hoặc thư mục cài đặt của bạn
+./change-api-token.sh
+```
+
+**Script sẽ thực hiện:**
+- Hiển thị token hiện tại
+- Cho phép nhập token mới hoặc tạo tự động
+- Cập nhật file cấu hình
+- Restart FastAPI container
+- Hiển thị token mới
+
+**Sau khi đổi token:**
+1. Cập nhật token mới trong tất cả N8N workflows
+2. Kiểm tra API hoạt động: `https://api.yourdomain.com/health`
+3. Test với workflow mẫu
+
+### Kiểm tra Token hiện tại
+
+```bash
+# Xem token hiện tại
+cd /home/n8n
+cat fastapi/.env
+```
+
+### Hướng dẫn đổi token thủ công
+
+Nếu script tự động không hoạt động, bạn có thể đổi token thủ công:
+
+```bash
+# 1. Tạo token mới
+NEW_TOKEN=$(openssl rand -hex 16)
+echo "Token mới: $NEW_TOKEN"
+
+# 2. Cập nhật file .env
+echo "API_TOKEN=\"$NEW_TOKEN\"" > /home/n8n/fastapi/.env
+
+# 3. Cập nhật docker-compose.yml
+sed -i "s/API_TOKEN=.*/API_TOKEN=$NEW_TOKEN/" /home/n8n/docker-compose.yml
+
+# 4. Restart FastAPI container
+cd /home/n8n
+docker-compose restart fastapi
+
+# 5. Kiểm tra API
+curl -H "Authorization: Bearer $NEW_TOKEN" \
+  "https://api.yourdomain.com/health"
+```
+
+### Lưu ý bảo mật
+
+- **Không bao giờ chia sẻ Bearer Token** với người khác
+- **Thay đổi token định kỳ** (mỗi 3-6 tháng)
+- **Sử dụng token mạnh** (ít nhất 16 ký tự)
+- **Không commit token** vào git repository
+- **Backup token** ở nơi an toàn
 
 ## 👨‍💻 Thông Tin Tác Giả
 
