@@ -835,7 +835,7 @@ services:
       sh -c "
         apt-get update && 
         apt-get install -y gcc python3-dev && 
-        pip install --no-cache-dir fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser && 
+        pip install --no-cache-dir fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 lxml_html_clean feedparser && 
         python main.py
       "
     networks:
