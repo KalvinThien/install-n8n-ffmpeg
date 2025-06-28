@@ -457,7 +457,7 @@ services:
     image: caddy:2
     restart: always
     ports:
-      - "80:80"  
+      - "8080:80"  
       - "443:443"
     volumes:
       - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
