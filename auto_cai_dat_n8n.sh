@@ -2,27 +2,30 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
-echo "                (Phiên bản cải tiến với News API & Telegram Backup)             "
+echo "     🚀 Script Cài Đặt N8N với FFmpeg, yt-dlp, Puppeteer và News API"
+echo "                    (Phiên bản cải tiến 2025)                       "
+echo "======================================================================"
+echo "👨‍💻 Tác giả: Nguyễn Ngọc Thiện"
+echo "📺 YouTube: https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1"
+echo "📱 Zalo: 08.8888.4749"
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
 if [[ $EUID -ne 0 ]]; then
-   echo "Script này cần được chạy với quyền root" 
+   echo "❌ Script này cần được chạy với quyền root" 
    exit 1
 fi
 
-# Suppress interactive prompts
+# Thiết lập biến môi trường để tránh interactive prompts
 export DEBIAN_FRONTEND=noninteractive
-export NEEDRESTART_MODE=a
 
 # Hàm thiết lập swap tự động
 setup_swap() {
-    echo "Kiểm tra và thiết lập swap tự động..."
+    echo "🔄 Kiểm tra và thiết lập swap tự động..."
     
     if [ "$(swapon --show | wc -l)" -gt 0 ]; then
         SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
-        echo "Swap đã được bật với kích thước ${SWAP_SIZE}. Bỏ qua thiết lập."
+        echo "✅ Swap đã được bật với kích thước ${SWAP_SIZE}. Bỏ qua thiết lập."
         return
     fi
     
@@ -38,7 +41,7 @@ setup_swap() {
     
     SWAP_GB=$(( (SWAP_SIZE + 1023) / 1024 ))
     
-    echo "Đang thiết lập swap với kích thước ${SWAP_GB}GB (${SWAP_SIZE}MB)..."
+    echo "🔄 Đang thiết lập swap với kích thước ${SWAP_GB}GB (${SWAP_SIZE}MB)..."
     
     dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE status=progress
     chmod 600 /swapfile
@@ -60,7 +63,7 @@ setup_swap() {
         echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
     fi
     
-    echo "Đã thiết lập swap với kích thước ${SWAP_GB}GB thành công."
+    echo "✅ Đã thiết lập swap với kích thước ${SWAP_GB}GB thành công."
 }
 
 # Hàm hiển thị trợ giúp
@@ -70,93 +73,64 @@ show_help() {
     echo "  -h, --help      Hiển thị trợ giúp này"
     echo "  -d, --dir DIR   Chỉ định thư mục cài đặt n8n (mặc định: /home/n8n)"
     echo "  -s, --skip-docker Bỏ qua cài đặt Docker (nếu đã có)"
-    echo "  --clean         Xóa tất cả cài đặt N8N cũ và tạo mới"
+    echo "  --clean         Xóa tất cả cài đặt cũ trước khi cài mới"
     exit 0
 }
 
-# Hàm cleanup Docker và N8N cũ
-cleanup_old_installation() {
-    echo "🧹 Đang tìm kiếm và dọn dẹp cài đặt N8N cũ..."
+# Hàm dọn dẹp cài đặt cũ
+cleanup_old_installations() {
+    echo "🧹 Bắt đầu dọn dẹp cài đặt cũ..."
     
-    # Tìm và dừng tất cả containers liên quan đến N8N
-    echo "Tìm kiếm containers N8N..."
-    N8N_CONTAINERS=$(docker ps -a --filter "name=n8n" --format "{{.Names}}" 2>/dev/null || true)
-    CADDY_CONTAINERS=$(docker ps -a --filter "name=caddy" --format "{{.Names}}" 2>/dev/null || true)
-    FASTAPI_CONTAINERS=$(docker ps -a --filter "name=fastapi" --format "{{.Names}}" 2>/dev/null || true)
+    # Dừng và xóa containers liên quan
+    echo "  🔄 Dừng và xóa containers cũ..."
+    docker stop $(docker ps -aq --filter "name=n8n") 2>/dev/null || true
+    docker stop $(docker ps -aq --filter "name=caddy") 2>/dev/null || true
+    docker stop $(docker ps -aq --filter "name=fastapi") 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "name=n8n") 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "name=caddy") 2>/dev/null || true
+    docker rm $(docker ps -aq --filter "name=fastapi") 2>/dev/null || true
     
-    if [ -n "$N8N_CONTAINERS" ] || [ -n "$CADDY_CONTAINERS" ] || [ -n "$FASTAPI_CONTAINERS" ]; then
-        echo "Tìm thấy containers cũ:"
-        [ -n "$N8N_CONTAINERS" ] && echo "  - N8N: $N8N_CONTAINERS"
-        [ -n "$CADDY_CONTAINERS" ] && echo "  - Caddy: $CADDY_CONTAINERS"
-        [ -n "$FASTAPI_CONTAINERS" ] && echo "  - FastAPI: $FASTAPI_CONTAINERS"
-        
-        echo "Đang dừng và xóa containers..."
-        for container in $N8N_CONTAINERS $CADDY_CONTAINERS $FASTAPI_CONTAINERS; do
-            docker stop "$container" 2>/dev/null || true
-            docker rm "$container" 2>/dev/null || true
-            echo "  ✅ Đã xóa container: $container"
-        done
-    fi
+    # Xóa docker-compose projects
+    echo "  🔄 Xóa docker-compose projects cũ..."
+    find /home -name "docker-compose.yml" -path "*/n8n/*" -exec dirname {} \; 2>/dev/null | while read dir; do
+        if [ -d "$dir" ]; then
+            echo "    Dọn dẹp: $dir"
+            cd "$dir" && docker-compose down 2>/dev/null || true
+        fi
+    done
     
-    # Tìm và xóa docker-compose projects
-    echo "Tìm kiếm docker-compose projects..."
-    COMPOSE_PROJECTS=$(docker compose ls --format json 2>/dev/null | jq -r '.[].Name' 2>/dev/null | grep -E "(n8n|caddy)" || true)
+    # Xóa images liên quan
+    echo "  🔄 Xóa Docker images cũ..."
+    docker rmi $(docker images | grep -E "(n8n|caddy)" | awk '{print $3}') 2>/dev/null || true
+    docker rmi n8n-custom-ffmpeg:latest 2>/dev/null || true
     
-    if [ -n "$COMPOSE_PROJECTS" ]; then
-        echo "Tìm thấy docker-compose projects: $COMPOSE_PROJECTS"
-        for project in $COMPOSE_PROJECTS; do
-            echo "Đang xóa project: $project"
-            docker compose -p "$project" down --volumes --remove-orphans 2>/dev/null || true
-            echo "  ✅ Đã xóa project: $project"
-        done
-    fi
+    # Xóa volumes
+    echo "  🔄 Xóa Docker volumes cũ..."
+    docker volume rm $(docker volume ls | grep -E "(n8n|caddy)" | awk '{print $2}') 2>/dev/null || true
     
-    # Tìm và xóa images liên quan
-    echo "Tìm kiếm Docker images liên quan..."
-    N8N_IMAGES=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep -E "(n8n|caddy)" || true)
+    # Xóa thư mục cài đặt
+    echo "  🔄 Xóa thư mục cài đặt cũ..."
+    find /home -maxdepth 2 -name "*n8n*" -type d 2>/dev/null | while read dir; do
+        if [ -d "$dir" ]; then
+            echo "    Xóa thư mục: $dir"
+            rm -rf "$dir"
+        fi
+    done
     
-    if [ -n "$N8N_IMAGES" ]; then
-        echo "Tìm thấy images cũ:"
-        echo "$N8N_IMAGES"
-        echo "Đang xóa images..."
-        echo "$N8N_IMAGES" | xargs -r docker rmi -f 2>/dev/null || true
-        echo "  ✅ Đã xóa images cũ"
-    fi
-    
-    # Tìm và xóa volumes
-    echo "Tìm kiếm Docker volumes..."
-    N8N_VOLUMES=$(docker volume ls --format "{{.Name}}" | grep -E "(n8n|caddy)" || true)
-    
-    if [ -n "$N8N_VOLUMES" ]; then
-        echo "Tìm thấy volumes cũ: $N8N_VOLUMES"
-        echo "Đang xóa volumes..."
-        echo "$N8N_VOLUMES" | xargs -r docker volume rm -f 2>/dev/null || true
-        echo "  ✅ Đã xóa volumes cũ"
-    fi
-    
-    # Tìm và xóa thư mục cài đặt cũ
-    echo "Tìm kiếm thư mục cài đặt N8N..."
-    OLD_N8N_DIRS=$(find /home -maxdepth 2 -name "*n8n*" -type d 2>/dev/null || true)
-    OLD_N8N_DIRS="$OLD_N8N_DIRS $(find /opt -maxdepth 2 -name "*n8n*" -type d 2>/dev/null || true)"
-    OLD_N8N_DIRS="$OLD_N8N_DIRS $(find /var -maxdepth 2 -name "*n8n*" -type d 2>/dev/null || true)"
-    
-    if [ -n "$OLD_N8N_DIRS" ]; then
-        echo "Tìm thấy thư mục cũ:"
-        echo "$OLD_N8N_DIRS"
-        echo "Đang xóa thư mục cũ..."
-        echo "$OLD_N8N_DIRS" | xargs -r rm -rf 2>/dev/null || true
-        echo "  ✅ Đã xóa thư mục cũ"
-    fi
+    find /opt -maxdepth 2 -name "*n8n*" -type d 2>/dev/null | while read dir; do
+        if [ -d "$dir" ]; then
+            echo "    Xóa thư mục: $dir"
+            rm -rf "$dir"
+        fi
+    done
     
     # Xóa cron jobs cũ
-    echo "Xóa cron jobs N8N cũ..."
-    (crontab -l 2>/dev/null | grep -v "n8n\|backup-workflows\|update-n8n" || true) | crontab - 2>/dev/null || true
-    echo "  ✅ Đã xóa cron jobs cũ"
+    echo "  🔄 Xóa cron jobs cũ..."
+    (crontab -l 2>/dev/null | grep -v "n8n" | grep -v "backup-workflows" | grep -v "update-n8n") | crontab - 2>/dev/null || true
     
     # Docker system prune
-    echo "Dọn dẹp Docker system..."
-    docker system prune -f --volumes 2>/dev/null || true
-    echo "  ✅ Đã dọn dẹp Docker system"
+    echo "  🔄 Dọn dẹp Docker system..."
+    docker system prune -af --volumes
     
     echo "🎉 Hoàn tất dọn dẹp cài đặt cũ!"
 }
@@ -184,11 +158,23 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         *)
-            echo "Tùy chọn không hợp lệ: $1"
+            echo "❌ Tùy chọn không hợp lệ: $1"
             show_help
             ;;
     esac
 done
+
+# Hỏi người dùng có muốn dọn dẹp cài đặt cũ không
+if [ "$CLEAN_INSTALL" = false ]; then
+    read -p "🧹 Bạn có muốn xóa tất cả cài đặt N8N/Docker cũ trước khi cài mới không? (y/n): " CLEAN_CHOICE
+    if [[ "$CLEAN_CHOICE" =~ ^[Yy]$ ]]; then
+        CLEAN_INSTALL=true
+    fi
+fi
+
+if [ "$CLEAN_INSTALL" = true ]; then
+    cleanup_old_installations
+fi
 
 # Hàm kiểm tra domain
 check_domain() {
@@ -206,13 +192,11 @@ check_domain() {
 
 # Hàm kiểm tra các lệnh cần thiết
 check_commands() {
-    for cmd in dig curl cron jq tar gzip bc docker; do
+    for cmd in dig curl cron jq tar gzip bc; do
         if ! command -v $cmd &> /dev/null; then
-            echo "Lệnh '$cmd' không tìm thấy. Đang cài đặt..."
-            apt-get update > /dev/null 2>&1
-            if [ "$cmd" == "docker" ]; then
-                install_docker
-            elif [ "$cmd" == "cron" ]; then
+            echo "🔄 Lệnh '$cmd' không tìm thấy. Đang cài đặt..."
+            apt-get update -qq > /dev/null
+            if [ "$cmd" == "cron" ]; then
                 apt-get install -y cron
             elif [ "$cmd" == "bc" ]; then
                 apt-get install -y bc
@@ -220,7 +204,7 @@ check_commands() {
                 apt-get install -y dnsutils curl jq tar gzip
             fi
             if ! command -v $cmd &> /dev/null; then
-                 echo "Lỗi: Không thể cài đặt lệnh '$cmd'. Vui lòng cài đặt thủ công và chạy lại script."
+                 echo "❌ Lỗi: Không thể cài đặt lệnh '$cmd'. Vui lòng cài đặt thủ công và chạy lại script."
                  exit 1
             fi
         fi
@@ -233,137 +217,124 @@ setup_swap
 # Hàm cài đặt Docker
 install_docker() {
     if $SKIP_DOCKER && command -v docker &> /dev/null; then
-        echo "Docker đã được cài đặt và bỏ qua theo yêu cầu..."
+        echo "✅ Docker đã được cài đặt và bỏ qua theo yêu cầu..."
         return
     fi
     
     if command -v docker &> /dev/null; then
-        echo "Docker đã được cài đặt."
+        echo "✅ Docker đã được cài đặt."
     else
-        echo "Cài đặt Docker..."
-        apt-get update > /dev/null 2>&1
-        apt-get install -y apt-transport-https ca-certificates curl software-properties-common > /dev/null 2>&1
+        echo "🔄 Cài đặt Docker..."
+        apt-get update -qq
+        apt-get install -y apt-transport-https ca-certificates curl software-properties-common
         mkdir -p /etc/apt/keyrings
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
         tee /etc/apt/sources.list.d/docker.list > /dev/null
-        apt-get update > /dev/null 2>&1
-        apt-get install -y docker-ce docker-ce-cli containerd.io > /dev/null 2>&1
+        apt-get update -qq
+        apt-get install -y docker-ce docker-ce-cli containerd.io
     fi
 
     # Cài đặt Docker Compose
     if command -v docker-compose &> /dev/null || (command -v docker &> /dev/null && docker compose version &> /dev/null); then
-        echo "Docker Compose đã được cài đặt."
+        echo "✅ Docker Compose đã được cài đặt."
     else 
-        echo "Cài đặt Docker Compose plugin..."
-        apt-get install -y docker-compose-plugin > /dev/null 2>&1
+        echo "🔄 Cài đặt Docker Compose plugin..."
+        apt-get install -y docker-compose-plugin
         if ! (docker compose version &> /dev/null); then 
-            echo "Cài docker-compose standalone..." 
-            apt-get install -y docker-compose > /dev/null 2>&1
+            echo "🔄 Thử cài docker-compose bản cũ..." 
+            apt-get install -y docker-compose 
         fi
     fi
     
     if ! command -v docker &> /dev/null; then
-        echo "Lỗi: Docker chưa được cài đặt đúng cách."
+        echo "❌ Lỗi: Docker chưa được cài đặt đúng cách."
         exit 1
     fi
 
     if ! command -v docker-compose &> /dev/null && ! (command -v docker &> /dev/null && docker compose version &> /dev/null); then
-        echo "Lỗi: Docker Compose chưa được cài đặt đúng cách."
+        echo "❌ Lỗi: Docker Compose chưa được cài đặt đúng cách."
         exit 1
     fi
 
     if [ "$SUDO_USER" != "" ]; then
-        echo "Thêm user $SUDO_USER vào nhóm docker..."
-        usermod -aG docker $SUDO_USER > /dev/null 2>&1
+        echo "🔄 Thêm user $SUDO_USER vào nhóm docker..."
+        usermod -aG docker $SUDO_USER
     fi
-    systemctl enable docker > /dev/null 2>&1
-    systemctl restart docker > /dev/null 2>&1
-    echo "Docker và Docker Compose đã được cài đặt thành công."
+    systemctl enable docker
+    systemctl restart docker
+    echo "✅ Docker và Docker Compose đã được cài đặt thành công."
 }
 
-# Kiểm tra cleanup
-if $CLEAN_INSTALL; then
-    echo "🧹 Chế độ Clean Install được kích hoạt"
-    cleanup_old_installation
-else
-    # Hỏi người dùng có muốn cleanup không
-    read -p "🧹 Bạn có muốn xóa tất cả cài đặt N8N cũ trước khi cài mới không? (y/n): " CLEANUP_CHOICE
-    if [[ "$CLEANUP_CHOICE" =~ ^[Yy]$ ]]; then
-        cleanup_old_installation
-    else
-        echo "Bỏ qua cleanup. Tiếp tục cài đặt..."
-    fi
-fi
-
 # Cài đặt các gói cần thiết
-echo "Đang kiểm tra và cài đặt các công cụ cần thiết..."
-apt-get update > /dev/null 2>&1
-apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx net-tools bc > /dev/null 2>&1
+echo "🔄 Đang kiểm tra và cài đặt các công cụ cần thiết..."
+apt-get update -qq > /dev/null
+apt-get install -y dnsutils curl cron jq tar gzip python3-full python3-venv pipx net-tools bc
 
 # Cài đặt yt-dlp
-echo "Cài đặt yt-dlp..."
+echo "🔄 Cài đặt yt-dlp..."
 if command -v pipx &> /dev/null; then
-    pipx install yt-dlp --force > /dev/null 2>&1
-    pipx ensurepath > /dev/null 2>&1
+    pipx install yt-dlp --force
+    pipx ensurepath
 else
     python3 -m venv /opt/yt-dlp-venv
-    /opt/yt-dlp-venv/bin/pip install -U pip yt-dlp > /dev/null 2>&1
+    /opt/yt-dlp-venv/bin/pip install -U pip yt-dlp
     ln -sf /opt/yt-dlp-venv/bin/yt-dlp /usr/local/bin/yt-dlp
     chmod +x /usr/local/bin/yt-dlp
 fi
 export PATH="$PATH:/usr/local/bin:/opt/yt-dlp-venv/bin:$HOME/.local/bin"
 
 # Đảm bảo cron service đang chạy
-systemctl enable cron > /dev/null 2>&1
-systemctl start cron > /dev/null 2>&1
+systemctl enable cron
+systemctl start cron
 
-# Kiểm tra các lệnh
+# Kiểm tra các lệnh (bao gồm Docker)
 check_commands
+install_docker
 
 # Nhận input domain từ người dùng
-read -p "Nhập tên miền chính của bạn (ví dụ: n8nkalvinbot.io.vn): " DOMAIN
+read -p "🌐 Nhập tên miền chính của bạn (ví dụ: n8nkalvinbot.io.vn): " DOMAIN
 while ! check_domain $DOMAIN; do
     echo "❌ Domain $DOMAIN chưa được trỏ đúng đến IP server này ($(curl -s https://api.ipify.org))."
-    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)." 
-    read -p "Nhấn Enter sau khi cập nhật DNS, hoặc nhập domain khác: " NEW_DOMAIN
+    echo "📝 Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)." 
+    read -p "🔄 Nhấn Enter sau khi cập nhật DNS, hoặc nhập domain khác: " NEW_DOMAIN
     if [ -n "$NEW_DOMAIN" ]; then
         DOMAIN="$NEW_DOMAIN"
     fi
 done
 echo "✅ Domain $DOMAIN đã được trỏ đúng. Tiếp tục cài đặt."
 
-# Hỏi về News API
-read -p "Bạn có muốn cài đặt FastAPI để cào nội dung bài viết không? (y/n): " INSTALL_NEWS_API
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
+# Hỏi cài đặt FastAPI
+read -p "📰 Bạn có muốn cài đặt FastAPI để cào nội dung bài viết không? (y/n): " INSTALL_FASTAPI
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
     API_DOMAIN="api.$DOMAIN"
-    echo "Sẽ tạo API tại: $API_DOMAIN"
+    echo "🌐 Sẽ tạo API tại: $API_DOMAIN"
     
-    echo "Kiểm tra domain API: $API_DOMAIN"
+    echo "🔄 Kiểm tra domain API: $API_DOMAIN"
     while ! check_domain $API_DOMAIN; do
         echo "❌ Domain API $API_DOMAIN chưa được trỏ đúng đến IP server này ($(curl -s https://api.ipify.org))."
-        echo "Vui lòng cập nhật bản ghi DNS để trỏ $API_DOMAIN đến IP $(curl -s https://api.ipify.org)."
-        read -p "Nhấn Enter sau khi cập nhật DNS, hoặc nhập domain API khác: " NEW_API_DOMAIN
+        echo "📝 Vui lòng cập nhật bản ghi DNS để trỏ $API_DOMAIN đến IP $(curl -s https://api.ipify.org)."
+        read -p "🔄 Nhấn Enter sau khi cập nhật DNS, hoặc nhập domain API khác: " NEW_API_DOMAIN
         if [ -n "$NEW_API_DOMAIN" ]; then
             API_DOMAIN="$NEW_API_DOMAIN"
         fi
     done
     echo "✅ Domain API $API_DOMAIN đã được trỏ đúng."
     
-    # Yêu cầu người dùng đặt Bearer Token
+    # Yêu cầu người dùng nhập Bearer Token
     while true; do
-        read -p "🔐 Nhập Bearer Token của bạn (ít nhất 20 ký tự, chỉ chữ và số): " NEWS_API_TOKEN
-        if [ ${#NEWS_API_TOKEN} -ge 20 ] && [[ "$NEWS_API_TOKEN" =~ ^[a-zA-Z0-9]+$ ]]; then
+        read -p "🔐 Nhập Bearer Token của bạn (ít nhất 20 ký tự, chỉ chữ và số): " BEARER_TOKEN
+        if [ ${#BEARER_TOKEN} -ge 20 ] && [[ "$BEARER_TOKEN" =~ ^[a-zA-Z0-9]+$ ]]; then
+            echo "✅ Bearer Token hợp lệ!"
             break
         else
-            echo "❌ Bearer Token phải có ít nhất 20 ký tự và chỉ chứa chữ cái và số!"
+            echo "❌ Token không hợp lệ! Cần ít nhất 20 ký tự và chỉ chứa chữ cái, số."
         fi
     done
-    echo "✅ Bearer Token hợp lệ!"
 fi
 
 # Tạo thư mục cho n8n
-echo "Tạo cấu trúc thư mục cho n8n tại $N8N_DIR..."
+echo "🔄 Tạo cấu trúc thư mục cho n8n tại $N8N_DIR..."
 mkdir -p $N8N_DIR
 mkdir -p $N8N_DIR/files
 mkdir -p $N8N_DIR/files/temp
@@ -371,7 +342,7 @@ mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
 # Tạo Dockerfile
-echo "Tạo Dockerfile..."
+echo "🔄 Tạo Dockerfile..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
 USER root
@@ -391,70 +362,48 @@ USER node
 WORKDIR /home/node
 EOF
 
-# Tạo Dockerfile.simple cho fallback
-cat << 'EOF' > $N8N_DIR/Dockerfile.simple
-FROM n8nio/n8n:latest
-USER root
-RUN apk update && \
-    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar gzip \
-    chromium nss freetype freetype-dev harfbuzz ca-certificates ttf-freefont \
-    font-noto font-noto-cjk font-noto-emoji dbus udev
-RUN pip3 install --break-system-packages -U yt-dlp && \
-    chmod +x /usr/bin/yt-dlp
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-RUN mkdir -p /files/youtube_content_anylystic /files/backup_full /files/temp && \
-    chown -R node:node /files
-USER node
-WORKDIR /home/node
-EOF
-
-# Cài đặt News API nếu được chọn
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "Cài đặt News Content API..."
+# Cài đặt FastAPI nếu được chọn
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+    echo "🔄 Cài đặt News Content API..."
     mkdir -p $N8N_DIR/news_api
     
-    # Tạo requirements.txt với version đúng
+    # Tạo requirements.txt
     cat << 'EOF' > $N8N_DIR/news_api/requirements.txt
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 newspaper4k==0.9.3.1
 python-multipart==0.0.6
-jinja2==3.1.2
-aiofiles==23.2.1
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
+Pillow==10.1.0
 python-dateutil==2.8.2
 feedparser==6.0.10
-pydantic==2.4.2
 EOF
 
-    # Tạo main.py cho FastAPI
+    # Tạo main.py
     cat << EOF > $N8N_DIR/news_api/main.py
 import os
-import asyncio
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import feedparser
 import requests
 from bs4 import BeautifulSoup
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl
 from newspaper import Article, Source
 import uvicorn
 
-# Logging setup
+# Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Security
-security = HTTPBearer()
-NEWS_API_TOKEN = os.getenv("NEWS_API_TOKEN", "default_token")
+# Bearer Token từ environment variable
+BEARER_TOKEN = os.getenv("NEWS_API_TOKEN", "default_token_change_me")
 
 app = FastAPI(
     title="News Content API",
@@ -464,7 +413,26 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-templates = Jinja2Templates(directory="/app/templates")
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Security
+security = HTTPBearer()
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    if credentials.credentials != BEARER_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
 
 # Models
 class ArticleRequest(BaseModel):
@@ -493,91 +461,135 @@ class ArticleResponse(BaseModel):
     word_count: int
     read_time_minutes: int
 
-# Auth dependency
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if credentials.credentials != NEWS_API_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid authentication token")
-    return credentials.credentials
+class SourceResponse(BaseModel):
+    articles: List[ArticleResponse]
+    total_found: int
 
-# Routes
+class FeedResponse(BaseModel):
+    articles: List[Dict[str, Any]]
+    total_found: int
+    feed_title: str
+    feed_description: str
+
 @app.get("/", response_class=HTMLResponse)
-async def homepage(request: Request):
-    domain = request.headers.get("host", "api.yourdomain.com")
-    curl_examples = {
-        "health": f'''curl -X GET "https://{domain}/health" \\
-     -H "Authorization: Bearer {NEWS_API_TOKEN}"''',
-        "extract_article": f'''curl -X POST "https://{domain}/extract-article" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer {NEWS_API_TOKEN}" \\
-     -d '{{
-       "url": "https://dantri.com.vn/the-gioi.htm",
-       "language": "vi",
-       "extract_images": true,
-       "summarize": true
-     }}'""",
-        "extract_source": f'''curl -X POST "https://{domain}/extract-source" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer {NEWS_API_TOKEN}" \\
-     -d '{{
-       "url": "https://dantri.com.vn",
-       "max_articles": 10,
-       "language": "vi"
-     }}'""",
-        "parse_feed": f'''curl -X POST "https://{domain}/parse-feed" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer {NEWS_API_TOKEN}" \\
-     -d '{{
-       "url": "https://dantri.com.vn/rss.xml",
-       "max_articles": 10
-     }}'"""
-    }
+async def homepage():
+    domain = os.getenv("API_DOMAIN", "api.yourdomain.com")
+    token = BEARER_TOKEN
     
-    html_content = f"""
+    html_content = f'''
     <!DOCTYPE html>
     <html lang="vi">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>News Content API - Kalvin Thien</title>
+        <title>News Content API - Cào Nội Dung Bài Viết</title>
         <style>
             * {{ margin: 0; padding: 0; box-sizing: border-box; }}
             body {{ 
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6; color: #333; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 min-height: 100vh;
+                color: #333;
             }}
-            .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
-            .header {{ text-align: center; color: white; margin-bottom: 40px; }}
-            .header h1 {{ font-size: 3rem; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }}
-            .header p {{ font-size: 1.2rem; opacity: 0.9; }}
-            .card {{ 
-                background: white; border-radius: 15px; padding: 30px; margin-bottom: 30px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.1); transition: transform 0.3s ease;
+            .container {{ 
+                max-width: 1200px; 
+                margin: 0 auto; 
+                padding: 20px;
             }}
-            .card:hover {{ transform: translateY(-5px); }}
-            .card h2 {{ color: #667eea; margin-bottom: 20px; font-size: 1.8rem; }}
-            .endpoint {{ 
-                background: #f8f9fa; border-radius: 10px; padding: 20px; margin-bottom: 20px;
+            .header {{
+                text-align: center;
+                color: white;
+                margin-bottom: 40px;
+            }}
+            .header h1 {{
+                font-size: 2.5rem;
+                margin-bottom: 10px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            }}
+            .header p {{
+                font-size: 1.2rem;
+                opacity: 0.9;
+            }}
+            .card {{
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                margin-bottom: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                transition: transform 0.3s ease;
+            }}
+            .card:hover {{
+                transform: translateY(-5px);
+            }}
+            .card h2 {{
+                color: #667eea;
+                margin-bottom: 20px;
+                font-size: 1.8rem;
+            }}
+            .token-display {{
+                background: #f8f9fa;
+                border: 2px solid #667eea;
+                border-radius: 10px;
+                padding: 15px;
+                margin: 20px 0;
+                font-family: 'Courier New', monospace;
+                font-size: 1.1rem;
+                word-break: break-all;
+            }}
+            .curl-example {{
+                background: #2d3748;
+                color: #e2e8f0;
+                border-radius: 10px;
+                padding: 20px;
+                margin: 15px 0;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9rem;
+                overflow-x: auto;
+                position: relative;
+            }}
+            .copy-btn {{
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 10px;
+                cursor: pointer;
+                font-size: 0.8rem;
+            }}
+            .copy-btn:hover {{
+                background: #5a67d8;
+            }}
+            .endpoint {{
+                background: #f7fafc;
                 border-left: 4px solid #667eea;
+                padding: 15px;
+                margin: 15px 0;
+                border-radius: 0 10px 10px 0;
             }}
-            .endpoint h3 {{ color: #333; margin-bottom: 10px; }}
-            .endpoint p {{ color: #666; margin-bottom: 15px; }}
-            .code-block {{ 
-                background: #2d3748; color: #e2e8f0; padding: 20px; border-radius: 8px;
-                font-family: 'Courier New', monospace; font-size: 14px; overflow-x: auto;
-                white-space: pre-wrap; word-wrap: break-word;
+            .method {{
+                display: inline-block;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 0.8rem;
+                margin-right: 10px;
             }}
-            .copy-btn {{ 
-                background: #667eea; color: white; border: none; padding: 8px 15px;
-                border-radius: 5px; cursor: pointer; margin-top: 10px; font-size: 12px;
+            .get {{ background: #48bb78; color: white; }}
+            .post {{ background: #ed8936; color: white; }}
+            .footer {{
+                text-align: center;
+                color: white;
+                margin-top: 40px;
+                opacity: 0.8;
             }}
-            .copy-btn:hover {{ background: #5a67d8; }}
-            .author {{ text-align: center; color: white; margin-top: 40px; }}
-            .author a {{ color: #ffd700; text-decoration: none; }}
-            .author a:hover {{ text-decoration: underline; }}
-            .token-info {{ 
-                background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px;
-                padding: 15px; margin-bottom: 20px; color: #856404;
+            .grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin-top: 20px;
             }}
         </style>
     </head>
@@ -585,87 +597,148 @@ async def homepage(request: Request):
         <div class="container">
             <div class="header">
                 <h1>🚀 News Content API</h1>
-                <p>API cào nội dung bài viết và RSS feeds - Phiên bản 2025</p>
+                <p>API mạnh mẽ để cào nội dung bài viết và RSS feeds</p>
             </div>
 
             <div class="card">
-                <div class="token-info">
-                    <strong>🔐 Bearer Token:</strong> {NEWS_API_TOKEN}<br>
-                    <small>Sử dụng token này trong header Authorization: Bearer {NEWS_API_TOKEN}</small>
+                <h2>🔑 Bearer Token</h2>
+                <p>Sử dụng token này để xác thực các API calls:</p>
+                <div class="token-display">
+                    <strong>Bearer Token:</strong> {token}
                 </div>
-                
-                <h2>📖 API Documentation</h2>
-                <p>Truy cập các trang tài liệu API:</p>
-                <ul style="margin: 15px 0; padding-left: 20px;">
-                    <li><a href="/docs" target="_blank">📚 Swagger UI</a> - Giao diện tương tác</li>
-                    <li><a href="/redoc" target="_blank">📖 ReDoc</a> - Tài liệu chi tiết</li>
-                </ul>
+                <p><strong>Lưu ý:</strong> Giữ token này bảo mật và không chia sẻ công khai!</p>
             </div>
 
             <div class="card">
-                <h2>🔧 API Endpoints</h2>
+                <h2>📖 API Endpoints</h2>
                 
                 <div class="endpoint">
-                    <h3>GET /health</h3>
-                    <p>Kiểm tra trạng thái API</p>
-                    <div class="code-block">{curl_examples["health"]}</div>
-                    <button class="copy-btn" onclick="copyToClipboard('{curl_examples["health"].replace("'", "\\'")}')">📋 Copy</button>
+                    <span class="method get">GET</span>
+                    <strong>/health</strong> - Kiểm tra trạng thái API
                 </div>
-
+                
                 <div class="endpoint">
-                    <h3>POST /extract-article</h3>
-                    <p>Lấy nội dung bài viết từ URL</p>
-                    <div class="code-block">{curl_examples["extract_article"]}</div>
-                    <button class="copy-btn" onclick="copyToClipboard('{curl_examples["extract_article"].replace("'", "\\'")}')">📋 Copy</button>
+                    <span class="method post">POST</span>
+                    <strong>/extract-article</strong> - Lấy nội dung bài viết từ URL
                 </div>
-
+                
                 <div class="endpoint">
-                    <h3>POST /extract-source</h3>
-                    <p>Cào nhiều bài viết từ website</p>
-                    <div class="code-block">{curl_examples["extract_source"]}</div>
-                    <button class="copy-btn" onclick="copyToClipboard('{curl_examples["extract_source"].replace("'", "\\'")}')">📋 Copy</button>
+                    <span class="method post">POST</span>
+                    <strong>/extract-source</strong> - Cào nhiều bài viết từ website
                 </div>
-
+                
                 <div class="endpoint">
-                    <h3>POST /parse-feed</h3>
-                    <p>Phân tích RSS feeds</p>
-                    <div class="code-block">{curl_examples["parse_feed"]}</div>
-                    <button class="copy-btn" onclick="copyToClipboard('{curl_examples["parse_feed"].replace("'", "\\'")}')">📋 Copy</button>
+                    <span class="method post">POST</span>
+                    <strong>/parse-feed</strong> - Phân tích RSS feeds
                 </div>
             </div>
 
-            <div class="author">
-                <p>🚀 Made with ❤️ by <strong>Nguyễn Ngọc Thiện</strong></p>
-                <p>
-                    📺 <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank">YouTube Channel</a> |
-                    📘 <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank">Facebook</a> |
-                    📱 Zalo: 08.8888.4749
-                </p>
+            <div class="card">
+                <h2>💻 Ví Dụ cURL</h2>
+                
+                <h3>1. Kiểm tra trạng thái API:</h3>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('health-curl')">Copy</button>
+                    <div id="health-curl">curl -X GET "https://{domain}/health" \\
+     -H "Authorization: Bearer {token}"</div>
+                </div>
+
+                <h3>2. Lấy nội dung bài viết:</h3>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('article-curl')">Copy</button>
+                    <div id="article-curl">curl -X POST "https://{domain}/extract-article" \\
+     -H "Content-Type: application/json" \\
+     -H "Authorization: Bearer {token}" \\
+     -d '{{
+       "url": "https://dantri.com.vn/the-gioi.htm",
+       "language": "vi",
+       "extract_images": true,
+       "summarize": true
+     }}'</div>
+                </div>
+
+                <h3>3. Cào nhiều bài viết từ website:</h3>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('source-curl')">Copy</button>
+                    <div id="source-curl">curl -X POST "https://{domain}/extract-source" \\
+     -H "Content-Type: application/json" \\
+     -H "Authorization: Bearer {token}" \\
+     -d '{{
+       "url": "https://dantri.com.vn",
+       "max_articles": 10,
+       "language": "vi"
+     }}'</div>
+                </div>
+
+                <h3>4. Phân tích RSS Feed:</h3>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('feed-curl')">Copy</button>
+                    <div id="feed-curl">curl -X POST "https://{domain}/parse-feed" \\
+     -H "Content-Type: application/json" \\
+     -H "Authorization: Bearer {token}" \\
+     -d '{{
+       "url": "https://dantri.com.vn/rss.xml",
+       "max_articles": 10
+     }}'</div>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h2>📚 Documentation</h2>
+                    <p>Xem tài liệu API chi tiết:</p>
+                    <ul style="margin-top: 10px;">
+                        <li><a href="/docs" target="_blank">Swagger UI</a></li>
+                        <li><a href="/redoc" target="_blank">ReDoc</a></li>
+                    </ul>
+                </div>
+
+                <div class="card">
+                    <h2>🔧 Đổi Bearer Token</h2>
+                    <p>Để đổi Bearer Token:</p>
+                    <div class="curl-example">
+                        <div>cd /home/n8n && \\
+sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN="NEW_TOKEN"/' docker-compose.yml && \\
+docker-compose restart fastapi</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>🚀 Made with ❤️ by Nguyễn Ngọc Thiện</p>
+                <p>📺 <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" style="color: #ffd700;">Subscribe YouTube Channel</a></p>
             </div>
         </div>
 
         <script>
-            function copyToClipboard(text) {{
+            function copyToClipboard(elementId) {{
+                const element = document.getElementById(elementId);
+                const text = element.textContent;
                 navigator.clipboard.writeText(text).then(function() {{
-                    alert('Đã copy lệnh curl!');
-                }}, function(err) {{
-                    console.error('Lỗi copy: ', err);
+                    const btn = element.parentElement.querySelector('.copy-btn');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    btn.style.background = '#48bb78';
+                    setTimeout(() => {{
+                        btn.textContent = originalText;
+                        btn.style.background = '#667eea';
+                    }}, 2000);
                 }});
             }}
         </script>
     </body>
     </html>
-    """
-    return HTMLResponse(content=html_content)
+    '''
+    return html_content
 
 @app.get("/health")
 async def health_check(token: str = Depends(verify_token)):
-    return {
+    return {{
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "2.0.0",
         "message": "News Content API đang hoạt động bình thường"
-    }
+    }}
 
 @app.post("/extract-article", response_model=ArticleResponse)
 async def extract_article(request: ArticleRequest, token: str = Depends(verify_token)):
@@ -677,13 +750,13 @@ async def extract_article(request: ArticleRequest, token: str = Depends(verify_t
         if request.summarize:
             article.nlp()
         
-        # Calculate read time (average 200 words per minute)
+        # Tính thời gian đọc (giả sử 200 từ/phút)
         word_count = len(article.text.split())
         read_time = max(1, round(word_count / 200))
         
         return ArticleResponse(
             title=article.title or "Không có tiêu đề",
-            content=article.text or "Không thể trích xuất nội dung",
+            content=article.text or "Không thể lấy nội dung",
             summary=article.summary if request.summarize else None,
             authors=article.authors or [],
             publish_date=article.publish_date.isoformat() if article.publish_date else None,
@@ -693,10 +766,10 @@ async def extract_article(request: ArticleRequest, token: str = Depends(verify_t
             read_time_minutes=read_time
         )
     except Exception as e:
-        logger.error(f"Error extracting article: {e}")
-        raise HTTPException(status_code=400, detail=f"Lỗi khi trích xuất bài viết: {str(e)}")
+        logger.error(f"Lỗi khi xử lý bài viết {{request.url}}: {{str(e)}}")
+        raise HTTPException(status_code=400, detail=f"Không thể xử lý bài viết: {{str(e)}}")
 
-@app.post("/extract-source")
+@app.post("/extract-source", response_model=SourceResponse)
 async def extract_source(request: SourceRequest, token: str = Depends(verify_token)):
     try:
         source = Source(str(request.url), language=request.language)
@@ -712,57 +785,55 @@ async def extract_source(request: SourceRequest, token: str = Depends(verify_tok
                 word_count = len(article.text.split())
                 read_time = max(1, round(word_count / 200))
                 
-                articles.append({
-                    "title": article.title or "Không có tiêu đề",
-                    "url": article_url,
-                    "content": article.text[:500] + "..." if len(article.text) > 500 else article.text,
-                    "authors": article.authors or [],
-                    "publish_date": article.publish_date.isoformat() if article.publish_date else None,
-                    "word_count": word_count,
-                    "read_time_minutes": read_time
-                })
+                articles.append(ArticleResponse(
+                    title=article.title or "Không có tiêu đề",
+                    content=article.text or "Không thể lấy nội dung",
+                    authors=article.authors or [],
+                    publish_date=article.publish_date.isoformat() if article.publish_date else None,
+                    images=list(article.images),
+                    url=article_url,
+                    word_count=word_count,
+                    read_time_minutes=read_time
+                ))
             except Exception as e:
-                logger.warning(f"Error processing article {article_url}: {e}")
+                logger.warning(f"Bỏ qua bài viết {{article_url}}: {{str(e)}}")
                 continue
         
-        return {
-            "source_url": str(request.url),
-            "total_articles": len(articles),
-            "articles": articles
-        }
+        return SourceResponse(
+            articles=articles,
+            total_found=len(articles)
+        )
     except Exception as e:
-        logger.error(f"Error extracting source: {e}")
-        raise HTTPException(status_code=400, detail=f"Lỗi khi trích xuất nguồn: {str(e)}")
+        logger.error(f"Lỗi khi xử lý nguồn {{request.url}}: {{str(e)}}")
+        raise HTTPException(status_code=400, detail=f"Không thể xử lý nguồn: {{str(e)}}")
 
-@app.post("/parse-feed")
+@app.post("/parse-feed", response_model=FeedResponse)
 async def parse_feed(request: FeedRequest, token: str = Depends(verify_token)):
     try:
         feed = feedparser.parse(str(request.url))
         
-        if feed.bozo:
-            raise HTTPException(status_code=400, detail="RSS feed không hợp lệ")
-        
         articles = []
         for entry in feed.entries[:request.max_articles]:
-            articles.append({
+            article_data = {{
                 "title": entry.get("title", "Không có tiêu đề"),
-                "url": entry.get("link", ""),
-                "summary": entry.get("summary", ""),
+                "link": entry.get("link", ""),
+                "description": entry.get("description", ""),
                 "published": entry.get("published", ""),
                 "author": entry.get("author", ""),
-                "tags": [tag.term for tag in entry.get("tags", [])]
-            })
+                "tags": [tag.term for tag in entry.get("tags", [])],
+                "summary": entry.get("summary", "")
+            }}
+            articles.append(article_data)
         
-        return {
-            "feed_title": feed.feed.get("title", ""),
-            "feed_description": feed.feed.get("description", ""),
-            "feed_url": str(request.url),
-            "total_articles": len(articles),
-            "articles": articles
-        }
+        return FeedResponse(
+            articles=articles,
+            total_found=len(articles),
+            feed_title=feed.feed.get("title", "Không có tiêu đề"),
+            feed_description=feed.feed.get("description", "Không có mô tả")
+        )
     except Exception as e:
-        logger.error(f"Error parsing feed: {e}")
-        raise HTTPException(status_code=400, detail=f"Lỗi khi phân tích RSS feed: {str(e)}")
+        logger.error(f"Lỗi khi phân tích feed {{request.url}}: {{str(e)}}")
+        raise HTTPException(status_code=400, detail=f"Không thể phân tích feed: {{str(e)}}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
@@ -774,28 +845,24 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Cài đặt system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libxml2-dev \
     libxslt-dev \
     libjpeg-dev \
+    libpng-dev \
+    libwebp-dev \
     zlib1g-dev \
-    libffi-dev \
-    libssl-dev \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Copy requirements và cài đặt Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY main.py .
-
-# Create templates directory
-RUN mkdir -p templates
+COPY . .
 
 # Expose port
 EXPOSE 8000
@@ -804,20 +871,12 @@ EXPOSE 8000
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 EOF
 
-    # Tạo script khởi động
-    cat << 'EOF' > $N8N_DIR/news_api/start_news_api.sh
-#!/bin/bash
-cd /app
-exec uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-EOF
-    chmod +x $N8N_DIR/news_api/start_news_api.sh
-    
     echo "✅ Đã tạo News API thành công!"
 fi
 
 # Tạo file docker-compose.yml
-echo "Tạo file docker-compose.yml..."
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
+echo "🔄 Tạo file docker-compose.yml..."
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
     cat << EOF > $N8N_DIR/docker-compose.yml
 services:
   n8n:
@@ -859,7 +918,8 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - NEWS_API_TOKEN=${NEWS_API_TOKEN}
+      - NEWS_API_TOKEN=${BEARER_TOKEN}
+      - API_DOMAIN=${API_DOMAIN}
     volumes:
       - ${N8N_DIR}/news_api:/app
 
@@ -882,11 +942,11 @@ volumes:
   caddy_config:
 EOF
 
-    echo "🔑 Bearer Token cho News API: $NEWS_API_TOKEN"
+    echo "🔑 Bearer Token cho News API: $BEARER_TOKEN"
     echo "📝 Lưu token này để sử dụng API!"
     
     # Lưu token vào file
-    echo "$NEWS_API_TOKEN" > $N8N_DIR/news_api_token.txt
+    echo "$BEARER_TOKEN" > $N8N_DIR/news_api_token.txt
     chmod 600 $N8N_DIR/news_api_token.txt
 else
     cat << EOF > $N8N_DIR/docker-compose.yml
@@ -940,19 +1000,16 @@ volumes:
 EOF
 fi
 
-# Tạo file Caddyfile với SSL tự động
-echo "Tạo file Caddyfile..."
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
+# Tạo file Caddyfile với SSL cải tiến
+echo "🔄 Tạo file Caddyfile..."
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
     cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
     tls {
         protocols tls1.2 tls1.3
     }
-    encode gzip
-    
     header {
-        # Security headers
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -966,16 +1023,12 @@ ${API_DOMAIN} {
     tls {
         protocols tls1.2 tls1.3
     }
-    encode gzip
-    
     header {
-        # Security headers
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
+        X-Frame-Options "SAMEORIGIN"
         X-XSS-Protection "1; mode=block"
         Referrer-Policy "strict-origin-when-cross-origin"
-        # CORS headers
         Access-Control-Allow-Origin "*"
         Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
         Access-Control-Allow-Headers "Content-Type, Authorization"
@@ -989,10 +1042,7 @@ ${DOMAIN} {
     tls {
         protocols tls1.2 tls1.3
     }
-    encode gzip
-    
     header {
-        # Security headers
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -1005,263 +1055,211 @@ fi
 
 # Cấu hình gửi backup qua Telegram
 TELEGRAM_CONF_FILE="$N8N_DIR/telegram_config.txt"
-read -p "Bạn có muốn cấu hình gửi file backup hàng ngày qua Telegram không? (y/n): " CONFIGURE_TELEGRAM
+read -p "📱 Bạn có muốn cấu hình gửi file backup hàng ngày qua Telegram không? (y/n): " CONFIGURE_TELEGRAM
 if [[ "$CONFIGURE_TELEGRAM" =~ ^[Yy]$ ]]; then
-    echo "Để gửi backup qua Telegram, bạn cần một Bot Token và Chat ID."
-    echo "Hướng dẫn lấy Bot Token: Nói chuyện với BotFather trên Telegram (tìm @BotFather), gõ /newbot, làm theo hướng dẫn."
-    echo "Hướng dẫn lấy Chat ID: Nói chuyện với bot @userinfobot trên Telegram, nó sẽ hiển thị User ID của bạn."
-    echo "Nếu muốn gửi vào group, thêm bot của bạn vào group, sau đó gửi tin nhắn bất kỳ, rồi truy cập:"
-    echo "https://api.telegram.org/bot<BOT_TOKEN>/getUpdates để lấy Chat ID (bắt đầu bằng dấu trừ)."
-    
-    read -p "Nhập Telegram Bot Token của bạn: " TELEGRAM_BOT_TOKEN
-    read -p "Nhập Telegram Chat ID của bạn (hoặc group ID): " TELEGRAM_CHAT_ID
-    
+    echo "📱 Để gửi backup qua Telegram, bạn cần Bot Token và Chat ID."
+    echo "🤖 Hướng dẫn lấy Bot Token: Tìm @BotFather trên Telegram, gõ /newbot"
+    echo "🆔 Hướng dẫn lấy Chat ID: Tìm @userinfobot trên Telegram, gõ /start"
+    read -p "🔑 Nhập Telegram Bot Token: " TELEGRAM_BOT_TOKEN
+    read -p "🆔 Nhập Telegram Chat ID: " TELEGRAM_CHAT_ID
     if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
         echo "TELEGRAM_BOT_TOKEN=\"$TELEGRAM_BOT_TOKEN\"" > "$TELEGRAM_CONF_FILE"
         echo "TELEGRAM_CHAT_ID=\"$TELEGRAM_CHAT_ID\"" >> "$TELEGRAM_CONF_FILE"
         chmod 600 "$TELEGRAM_CONF_FILE"
         echo "✅ Đã lưu cấu hình Telegram vào $TELEGRAM_CONF_FILE"
-        
-        # Test gửi tin nhắn
-        echo "🧪 Đang test gửi tin nhắn Telegram..."
-        TEST_MESSAGE="🎉 Chào mừng! Hệ thống N8N backup đã được cấu hình thành công cho domain: $DOMAIN
-
-📅 Backup tự động: Mỗi ngày lúc 2:00 AM
-📱 Thông báo: Sẽ gửi qua Telegram này
-📁 File backup: Sẽ gửi nếu < 20MB
-
-🚀 Tác giả: Nguyễn Ngọc Thiện
-📺 YouTube: https://www.youtube.com/@kalvinthiensocial"
-
-        if curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            -d chat_id="${TELEGRAM_CHAT_ID}" \
-            -d text="${TEST_MESSAGE}" \
-            -d parse_mode="Markdown" > /dev/null 2>&1; then
-            echo "✅ Test Telegram thành công! Kiểm tra tin nhắn trong Telegram."
-        else
-            echo "❌ Test Telegram thất bại. Kiểm tra lại Bot Token và Chat ID."
-        fi
     else
-        echo "Bot Token hoặc Chat ID không được cung cấp. Bỏ qua cấu hình Telegram."
+        echo "❌ Bot Token hoặc Chat ID không được cung cấp. Bỏ qua cấu hình Telegram."
     fi
-elif [[ "$CONFIGURE_TELEGRAM" =~ ^[Nn]$ ]]; then
-    echo "Đã bỏ qua cấu hình gửi backup qua Telegram."
+else
+    echo "⏭️ Đã bỏ qua cấu hình gửi backup qua Telegram."
     if [ -f "$TELEGRAM_CONF_FILE" ]; then
         rm -f "$TELEGRAM_CONF_FILE"
     fi
-else
-    echo "Lựa chọn không hợp lệ. Mặc định bỏ qua cấu hình Telegram."
 fi
 
-# Hỏi về auto-update
-read -p "Bạn có muốn bật tính năng tự động cập nhật N8N không? (y/n): " ENABLE_AUTO_UPDATE
+# Hỏi về tự động cập nhật
+read -p "🔄 Bạn có muốn bật tính năng tự động cập nhật N8N không? (y/n): " AUTO_UPDATE
+if [[ "$AUTO_UPDATE" =~ ^[Nn]$ ]]; then
+    AUTO_UPDATE_ENABLED=false
+else
+    AUTO_UPDATE_ENABLED=true
+fi
 
-# Tạo script sao lưu workflow và credentials
-echo "Tạo script sao lưu workflow và credentials tại $N8N_DIR/backup-workflows.sh..."
-cat << 'EOF' > $N8N_DIR/backup-workflows.sh
+# Tạo script sao lưu workflow và credentials với fix lỗi
+echo "🔄 Tạo script sao lưu workflow và credentials tại $N8N_DIR/backup-workflows.sh..."
+cat << EOF > $N8N_DIR/backup-workflows.sh
 #!/bin/bash
 
+# Định nghĩa các biến
 N8N_DIR_VALUE="$N8N_DIR"
-BACKUP_BASE_DIR="${N8N_DIR_VALUE}/files/backup_full"
-LOG_FILE="${N8N_DIR_VALUE}/files/backup_full/backup.log"
-TELEGRAM_CONF_FILE="${N8N_DIR_VALUE}/telegram_config.txt"
-DATE="$(date +"%Y%m%d_%H%M%S")"
-BACKUP_FILE_NAME="n8n_backup_${DATE}.tar.gz"
-BACKUP_FILE_PATH="${BACKUP_BASE_DIR}/${BACKUP_FILE_NAME}"
-TEMP_DIR_HOST="/tmp/n8n_backup_host_${DATE}"
+BACKUP_BASE_DIR="\${N8N_DIR_VALUE}/files/backup_full"
+LOG_FILE="\${N8N_DIR_VALUE}/files/backup_full/backup.log"
+TELEGRAM_CONF_FILE="\${N8N_DIR_VALUE}/telegram_config.txt"
+DATE="\$(date +"%Y%m%d_%H%M%S")"
+BACKUP_FILE_NAME="n8n_backup_\${DATE}.tar.gz"
+BACKUP_FILE_PATH="\${BACKUP_BASE_DIR}/\${BACKUP_FILE_NAME}"
+TEMP_DIR_HOST="/tmp/n8n_backup_host_\${DATE}"
 TEMP_DIR_CONTAINER_BASE="/tmp/n8n_workflow_exports"
-
 TELEGRAM_FILE_SIZE_LIMIT=20971520 # 20MB
 
+# Hàm logging
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "${LOG_FILE}"
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a "\${LOG_FILE}"
 }
 
+# Hàm gửi tin nhắn Telegram
 send_telegram_message() {
-    local message="$1"
-    if [ -f "${TELEGRAM_CONF_FILE}" ]; then
-        source "${TELEGRAM_CONF_FILE}"
-        if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
-            (curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-                -d chat_id="${TELEGRAM_CHAT_ID}" \
-                -d text="${message}" \
+    local message="\$1"
+    if [ -f "\${TELEGRAM_CONF_FILE}" ]; then
+        source "\${TELEGRAM_CONF_FILE}"
+        if [ -n "\${TELEGRAM_BOT_TOKEN}" ] && [ -n "\${TELEGRAM_CHAT_ID}" ]; then
+            (curl -s -X POST "https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/sendMessage" \\
+                -d chat_id="\${TELEGRAM_CHAT_ID}" \\
+                -d text="\${message}" \\
                 -d parse_mode="Markdown" > /dev/null 2>&1) &
         fi
     fi
 }
 
+# Hàm gửi file qua Telegram
 send_telegram_document() {
-    local file_path="$1"
-    local caption="$2"
-    if [ -f "${TELEGRAM_CONF_FILE}" ]; then
-        source "${TELEGRAM_CONF_FILE}"
-        if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
-            local file_size="$(du -b "${file_path}" | cut -f1)"
-            if [ "${file_size}" -le "${TELEGRAM_FILE_SIZE_LIMIT}" ]; then
-                log "Đang gửi file backup qua Telegram: ${file_path}"
-                (curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-                    -F chat_id="${TELEGRAM_CHAT_ID}" \
-                    -F document=@"${file_path}" \
-                    -F caption="${caption}" > /dev/null 2>&1) &
+    local file_path="\$1"
+    local caption="\$2"
+    if [ -f "\${TELEGRAM_CONF_FILE}" ]; then
+        source "\${TELEGRAM_CONF_FILE}"
+        if [ -n "\${TELEGRAM_BOT_TOKEN}" ] && [ -n "\${TELEGRAM_CHAT_ID}" ]; then
+            local file_size="\$(du -b "\${file_path}" | cut -f1)"
+            if [ "\${file_size}" -le "\${TELEGRAM_FILE_SIZE_LIMIT}" ]; then
+                log "Đang gửi file backup qua Telegram: \${file_path}"
+                (curl -s -X POST "https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/sendDocument" \\
+                    -F chat_id="\${TELEGRAM_CHAT_ID}" \\
+                    -F document=@"\${file_path}" \\
+                    -F caption="\${caption}" > /dev/null 2>&1) &
             else
-                local readable_size="$(echo "scale=2; ${file_size} / 1024 / 1024" | bc)"
-                log "File backup quá lớn (${readable_size} MB) để gửi qua Telegram."
-                send_telegram_message "📦 Backup N8N hoàn tất!
-
-📁 File: \`${BACKUP_FILE_NAME}\`
-📊 Kích thước: ${readable_size}MB (quá lớn để gửi)
-📍 Vị trí: \`${file_path}\`
-🕐 Thời gian: $(date '+%d/%m/%Y %H:%M:%S')
-
-⚠️ File quá lớn (>20MB) nên không thể gửi qua Telegram."
+                local readable_size="\$(echo "scale=2; \${file_size} / 1024 / 1024" | bc)"
+                log "File backup quá lớn (\${readable_size} MB) để gửi qua Telegram."
+                send_telegram_message "Hoàn tất sao lưu N8N. File backup '\${BACKUP_FILE_NAME}' (\${readable_size}MB) quá lớn để gửi. Nó được lưu tại: \${file_path} trên server."
             fi
         fi
     fi
 }
 
-mkdir -p "${BACKUP_BASE_DIR}"
+# Tạo thư mục backup nếu chưa có
+mkdir -p "\${BACKUP_BASE_DIR}"
+
 log "Bắt đầu sao lưu workflows và credentials..."
-send_telegram_message "🔄 Bắt đầu quá trình sao lưu N8N hàng ngày...
+send_telegram_message "🔄 Bắt đầu quá trình sao lưu N8N hàng ngày cho domain: $DOMAIN..."
 
-🌐 Domain: \`$DOMAIN\`
-📅 Thời gian: $(date '+%d/%m/%Y %H:%M:%S')"
+# Tìm container N8N
+N8N_CONTAINER_ID="\$(docker ps -q --filter "name=n8n" --format '{{.ID}}' | head -n 1)"
 
-N8N_CONTAINER_NAME_PATTERN="n8n"
-N8N_CONTAINER_ID="$(docker ps -q --filter "name=${N8N_CONTAINER_NAME_PATTERN}" --format '{{.ID}}' | head -n 1)"
-
-if [ -z "${N8N_CONTAINER_ID}" ]; then
+if [ -z "\${N8N_CONTAINER_ID}" ]; then
     log "Lỗi: Không tìm thấy container n8n đang chạy."
-    send_telegram_message "❌ Lỗi sao lưu N8N!
-
-🌐 Domain: \`$DOMAIN\`
-❗ Lỗi: Không tìm thấy container n8n đang chạy
-📋 Log: \`${LOG_FILE}\`"
+    send_telegram_message "❌ Lỗi sao lưu N8N ($DOMAIN): Không tìm thấy container n8n đang chạy."
     exit 1
 fi
-log "Tìm thấy container N8N ID: ${N8N_CONTAINER_ID}"
 
-mkdir -p "${TEMP_DIR_HOST}/workflows"
-mkdir -p "${TEMP_DIR_HOST}/credentials"
-mkdir -p "${TEMP_DIR_HOST}/metadata"
+log "Tìm thấy container N8N ID: \${N8N_CONTAINER_ID}"
 
-# Tạo thư mục export tạm thời bên trong container
-TEMP_DIR_CONTAINER_UNIQUE="${TEMP_DIR_CONTAINER_BASE}/export_${DATE}"
-docker exec "${N8N_CONTAINER_ID}" mkdir -p "${TEMP_DIR_CONTAINER_UNIQUE}"
+# Tạo thư mục tạm
+mkdir -p "\${TEMP_DIR_HOST}/workflows"
+mkdir -p "\${TEMP_DIR_HOST}/credentials"
 
-log "Xuất workflows vào ${TEMP_DIR_CONTAINER_UNIQUE} trong container..." 
-WORKFLOWS_JSON="$(docker exec "${N8N_CONTAINER_ID}" n8n list:workflow --json 2>/dev/null || echo "[]")"
+# Tạo thư mục export trong container
+TEMP_DIR_CONTAINER_UNIQUE="\${TEMP_DIR_CONTAINER_BASE}/export_\${DATE}"
+docker exec "\${N8N_CONTAINER_ID}" mkdir -p "\${TEMP_DIR_CONTAINER_UNIQUE}"
 
-WORKFLOW_COUNT=0
-if [ -z "${WORKFLOWS_JSON}" ] || [ "${WORKFLOWS_JSON}" == "[]" ]; then
+log "Xuất workflows vào \${TEMP_DIR_CONTAINER_UNIQUE} trong container..."
+WORKFLOWS_JSON="\$(docker exec "\${N8N_CONTAINER_ID}" n8n list:workflow --json 2>/dev/null || echo "[]")"
+
+if [ -z "\${WORKFLOWS_JSON}" ] || [ "\${WORKFLOWS_JSON}" == "[]" ]; then
     log "Cảnh báo: Không tìm thấy workflow nào để sao lưu."
 else
-    echo "${WORKFLOWS_JSON}" | jq -c '.[]' 2>/dev/null | while IFS= read -r workflow; do
-        id="$(echo "${workflow}" | jq -r '.id' 2>/dev/null || echo "")"
-        name="$(echo "${workflow}" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')"
-        safe_name="$(echo "${name}" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-100)"
+    echo "\${WORKFLOWS_JSON}" | jq -c '.[]' 2>/dev/null | while IFS= read -r workflow; do
+        id="\$(echo "\${workflow}" | jq -r '.id' 2>/dev/null || echo "")"
+        name="\$(echo "\${workflow}" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]_-' | tr '[:space:]' '_')"
+        safe_name="\$(echo "\${name}" | sed 's/[^a-zA-Z0-9_-]/_/g' | cut -c1-100)"
         
-        if [ -n "${id}" ] && [ "${id}" != "null" ]; then
-            output_file_container="${TEMP_DIR_CONTAINER_UNIQUE}/${id}-${safe_name}.json"
-            log "Đang xuất workflow: '${name}' (ID: ${id})"
-            if docker exec "${N8N_CONTAINER_ID}" n8n export:workflow --id="${id}" --output="${output_file_container}" 2>/dev/null; then
-                log "✅ Đã xuất workflow ID ${id} thành công."
-                WORKFLOW_COUNT=$((WORKFLOW_COUNT + 1))
+        if [ -n "\${id}" ] && [ "\${id}" != "null" ]; then
+            output_file_container="\${TEMP_DIR_CONTAINER_UNIQUE}/\${id}-\${safe_name}.json"
+            log "Đang xuất workflow: '\${name}' (ID: \${id})"
+            if docker exec "\${N8N_CONTAINER_ID}" n8n export:workflow --id="\${id}" --output="\${output_file_container}" 2>/dev/null; then
+                log "Đã xuất workflow ID \${id} thành công."
             else
-                log "❌ Lỗi khi xuất workflow ID ${id}."
+                log "Lỗi khi xuất workflow ID \${id}."
             fi
         fi
     done
 
-    log "Sao chép workflows từ container vào host..."
-    if docker cp "${N8N_CONTAINER_ID}:${TEMP_DIR_CONTAINER_UNIQUE}/." "${TEMP_DIR_HOST}/workflows/" 2>/dev/null; then
-        log "✅ Sao chép workflows từ container ra host thành công."
-        WORKFLOW_COUNT=$(find "${TEMP_DIR_HOST}/workflows" -name "*.json" | wc -l)
+    log "Sao chép workflows từ container ra host"
+    if docker cp "\${N8N_CONTAINER_ID}:\${TEMP_DIR_CONTAINER_UNIQUE}/." "\${TEMP_DIR_HOST}/workflows/" 2>/dev/null; then
+        log "Sao chép workflows thành công."
     else
-        log "❌ Lỗi khi sao chép workflows từ container ra host."
+        log "Lỗi khi sao chép workflows."
     fi
 fi
 
 # Backup database và encryption key
-DB_PATH_HOST="${N8N_DIR_VALUE}/database.sqlite"
-KEY_PATH_HOST="${N8N_DIR_VALUE}/encryptionKey"
+DB_PATH_HOST="\${N8N_DIR_VALUE}/database.sqlite"
+KEY_PATH_HOST="\${N8N_DIR_VALUE}/encryptionKey"
 
-log "Sao lưu database và encryption key từ host..."
-if [ -f "${DB_PATH_HOST}" ]; then
-    cp "${DB_PATH_HOST}" "${TEMP_DIR_HOST}/credentials/database.sqlite"
-    log "✅ Đã sao lưu database.sqlite"
+log "Sao lưu database và encryption key..."
+if [ -f "\${DB_PATH_HOST}" ]; then
+    cp "\${DB_PATH_HOST}" "\${TEMP_DIR_HOST}/credentials/database.sqlite"
+    log "Đã sao lưu database.sqlite"
 else
-    log "❌ Không tìm thấy file database.sqlite tại ${DB_PATH_HOST}"
+    log "Cảnh báo: Không tìm thấy file database.sqlite tại \${DB_PATH_HOST}"
 fi
 
-if [ -f "${KEY_PATH_HOST}" ]; then
-    cp "${KEY_PATH_HOST}" "${TEMP_DIR_HOST}/credentials/encryptionKey"
-    log "✅ Đã sao lưu encryptionKey"
+if [ -f "\${KEY_PATH_HOST}" ]; then
+    cp "\${KEY_PATH_HOST}" "\${TEMP_DIR_HOST}/credentials/encryptionKey"
+    log "Đã sao lưu encryptionKey"
 else
-    log "❌ Không tìm thấy file encryptionKey tại ${KEY_PATH_HOST}"
+    log "Cảnh báo: Không tìm thấy file encryptionKey tại \${KEY_PATH_HOST}"
 fi
 
 # Tạo metadata
-cat << EOF > "${TEMP_DIR_HOST}/metadata/backup_info.json"
+cat << METADATA_EOF > "\${TEMP_DIR_HOST}/backup_metadata.json"
 {
-    "backup_date": "$(date -Iseconds)",
+    "backup_date": "\$(date -Iseconds)",
     "domain": "$DOMAIN",
-    "workflow_count": ${WORKFLOW_COUNT},
-    "n8n_container_id": "${N8N_CONTAINER_ID}",
-    "backup_version": "2.0",
-    "created_by": "Nguyễn Ngọc Thiện - N8N Auto Backup Script"
+    "n8n_version": "\$(docker exec "\${N8N_CONTAINER_ID}" n8n --version 2>/dev/null || echo "unknown")",
+    "backup_type": "full",
+    "created_by": "auto_backup_script"
 }
-EOF
+METADATA_EOF
 
-log "Tạo file nén tar.gz: ${BACKUP_FILE_PATH}"
-if tar -czf "${BACKUP_FILE_PATH}" -C "${TEMP_DIR_HOST}" . 2>/dev/null; then
-    BACKUP_SIZE=$(du -h "${BACKUP_FILE_PATH}" | cut -f1)
-    log "✅ Tạo file backup ${BACKUP_FILE_PATH} thành công. Kích thước: ${BACKUP_SIZE}"
-    
-    # Gửi qua Telegram
-    BACKUP_CAPTION="📦 Backup N8N hoàn tất!
-
-🌐 Domain: $DOMAIN
-📁 File: ${BACKUP_FILE_NAME}
-📊 Kích thước: ${BACKUP_SIZE}
-📋 Workflows: ${WORKFLOW_COUNT}
-🕐 Thời gian: $(date '+%d/%m/%Y %H:%M:%S')
-
-✅ Backup thành công!"
-
-    send_telegram_document "${BACKUP_FILE_PATH}" "${BACKUP_CAPTION}"
+log "Tạo file nén tar.gz: \${BACKUP_FILE_PATH}"
+if tar -czf "\${BACKUP_FILE_PATH}" -C "\${TEMP_DIR_HOST}" . 2>/dev/null; then
+    log "Tạo file backup \${BACKUP_FILE_PATH} thành công."
+    send_telegram_document "\${BACKUP_FILE_PATH}" "✅ Sao lưu N8N ($DOMAIN) hàng ngày hoàn tất: \${BACKUP_FILE_NAME}"
 else
-    log "❌ Không thể tạo file backup ${BACKUP_FILE_PATH}."
-    send_telegram_message "❌ Lỗi sao lưu N8N!
-
-🌐 Domain: \`$DOMAIN\`
-❗ Lỗi: Không thể tạo file backup
-📋 Log: \`${LOG_FILE}\`
-🕐 Thời gian: $(date '+%d/%m/%Y %H:%M:%S')"
+    log "Lỗi: Không thể tạo file backup \${BACKUP_FILE_PATH}."
+    send_telegram_message "❌ Lỗi sao lưu N8N ($DOMAIN): Không thể tạo file backup. Kiểm tra log tại \${LOG_FILE}"
 fi
 
 # Dọn dẹp
 log "Dọn dẹp thư mục tạm..."
-rm -rf "${TEMP_DIR_HOST}"
-docker exec "${N8N_CONTAINER_ID}" rm -rf "${TEMP_DIR_CONTAINER_UNIQUE}" 2>/dev/null || true
+rm -rf "\${TEMP_DIR_HOST}"
+docker exec "\${N8N_CONTAINER_ID}" rm -rf "\${TEMP_DIR_CONTAINER_UNIQUE}" 2>/dev/null || true
 
 # Giữ lại 30 bản backup gần nhất
-log "Giữ lại 30 bản sao lưu gần nhất trong ${BACKUP_BASE_DIR}..."
-find "${BACKUP_BASE_DIR}" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f -printf '%T@ %p\n' 2>/dev/null | \
+log "Giữ lại 30 bản sao lưu gần nhất..."
+find "\${BACKUP_BASE_DIR}" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f -printf '%T@ %p\\n' 2>/dev/null | \\
 sort -nr | tail -n +31 | cut -d' ' -f2- | xargs -r rm -f
 
-REMAINING_BACKUPS=$(find "${BACKUP_BASE_DIR}" -maxdepth 1 -name 'n8n_backup_*.tar.gz' -type f | wc -l)
-log "Hoàn tất sao lưu. Còn lại ${REMAINING_BACKUPS} bản backup trong hệ thống."
+log "Sao lưu hoàn tất: \${BACKUP_FILE_PATH}"
+if [ -f "\${BACKUP_FILE_PATH}" ]; then
+    send_telegram_message "✅ Hoàn tất sao lưu N8N ($DOMAIN). File: \${BACKUP_FILE_NAME}"
+else
+    send_telegram_message "❌ Sao lưu N8N ($DOMAIN) thất bại. Kiểm tra log tại \${LOG_FILE}"
+fi
 
 exit 0
 EOF
 
-# Thay thế biến trong script
-sed -i "s|\$N8N_DIR|$N8N_DIR|g" $N8N_DIR/backup-workflows.sh
-sed -i "s|\$DOMAIN|$DOMAIN|g" $N8N_DIR/backup-workflows.sh
-chmod +x $N8N_DIR/backup-workflows.sh
-
 # Tạo script backup thủ công để test
-echo "Tạo script backup thủ công tại $N8N_DIR/backup-manual.sh..."
+echo "🔄 Tạo script backup thủ công tại $N8N_DIR/backup-manual.sh..."
 cat << EOF > $N8N_DIR/backup-manual.sh
 #!/bin/bash
 echo "🧪 Chạy backup thủ công để kiểm tra..."
@@ -1271,102 +1269,103 @@ echo ""
 $N8N_DIR/backup-workflows.sh
 echo ""
 echo "✅ Hoàn tất backup thủ công!"
-echo "📁 Kiểm tra file backup tại: $N8N_DIR/files/backup_full/"
+echo "📂 Kiểm tra file backup tại: $N8N_DIR/files/backup_full/"
 ls -la $N8N_DIR/files/backup_full/*.tar.gz 2>/dev/null || echo "Chưa có file backup nào."
 EOF
-chmod +x $N8N_DIR/backup-manual.sh
 
 # Tạo script chẩn đoán
-echo "Tạo script chẩn đoán tại $N8N_DIR/troubleshoot.sh..."
+echo "🔄 Tạo script chẩn đoán tại $N8N_DIR/troubleshoot.sh..."
 cat << EOF > $N8N_DIR/troubleshoot.sh
 #!/bin/bash
-echo "🔍 SCRIPT CHẨN ĐOÁN HỆ THỐNG N8N"
-echo "=================================="
-echo ""
-
-echo "📊 THÔNG TIN HỆ THỐNG:"
-echo "- OS: \$(lsb_release -d | cut -f2)"
-echo "- Kernel: \$(uname -r)"
-echo "- RAM: \$(free -h | grep Mem | awk '{print \$2}')"
-echo "- Disk: \$(df -h / | tail -1 | awk '{print \$4}') free"
-echo "- Swap: \$(free -h | grep Swap | awk '{print \$2}')"
+echo "🔍 SCRIPT CHẨN ĐOÁN N8N"
+echo "======================================================================"
+echo "📅 Thời gian: \$(date)"
+echo "🌐 Domain: $DOMAIN"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+echo "📰 API Domain: $API_DOMAIN"
+fi
+echo "📁 Thư mục N8N: $N8N_DIR"
 echo ""
 
 echo "🐳 DOCKER STATUS:"
-docker --version 2>/dev/null || echo "❌ Docker không được cài đặt"
-docker-compose --version 2>/dev/null || docker compose version 2>/dev/null || echo "❌ Docker Compose không được cài đặt"
-echo "- Docker service: \$(systemctl is-active docker)"
+echo "Docker version: \$(docker --version)"
+echo "Docker Compose: \$(docker-compose --version 2>/dev/null || docker compose version 2>/dev/null)"
 echo ""
 
 echo "📦 CONTAINERS:"
 cd $N8N_DIR
-if command -v docker-compose &> /dev/null; then
-    docker-compose ps
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose ps
-else
-    echo "❌ Không tìm thấy docker-compose"
-fi
+docker-compose ps
 echo ""
 
-echo "🌐 NETWORK & DNS:"
-echo "- Server IP: \$(curl -s https://api.ipify.org || echo 'Không lấy được IP')"
-echo "- Domain $DOMAIN resolves to: \$(dig +short $DOMAIN A | head -1)"
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "- API Domain $API_DOMAIN resolves to: \$(dig +short $API_DOMAIN A | head -1)"
+echo "🔗 NETWORK CONNECTIVITY:"
+echo "Server IP: \$(curl -s https://api.ipify.org)"
+echo "Domain $DOMAIN resolves to: \$(dig +short $DOMAIN A)"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+echo "API Domain $API_DOMAIN resolves to: \$(dig +short $API_DOMAIN A)"
 fi
 echo ""
 
 echo "🔒 SSL CERTIFICATES:"
-echo "- $DOMAIN SSL: \$(curl -s -I https://$DOMAIN | head -1 || echo 'Không kết nối được')"
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "- $API_DOMAIN SSL: \$(curl -s -I https://$API_DOMAIN | head -1 || echo 'Không kết nối được')"
+echo "Checking $DOMAIN SSL..."
+curl -I https://$DOMAIN 2>/dev/null | head -n 1 || echo "❌ SSL check failed for $DOMAIN"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+echo "Checking $API_DOMAIN SSL..."
+curl -I https://$API_DOMAIN 2>/dev/null | head -n 1 || echo "❌ SSL check failed for $API_DOMAIN"
 fi
 echo ""
 
-echo "📁 FILES & PERMISSIONS:"
-echo "- N8N Directory: $N8N_DIR"
-ls -la $N8N_DIR/ | head -10
+echo "💾 DISK USAGE:"
+df -h $N8N_DIR
 echo ""
 
-echo "📋 LOGS (Last 10 lines):"
-echo "--- Docker Compose Logs ---"
-cd $N8N_DIR
-if command -v docker-compose &> /dev/null; then
-    docker-compose logs --tail=10
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose logs --tail=10
+echo "📋 RECENT LOGS (last 20 lines):"
+echo "--- N8N Logs ---"
+docker-compose logs --tail=20 n8n 2>/dev/null || echo "No N8N logs available"
+echo ""
+echo "--- Caddy Logs ---"
+docker-compose logs --tail=20 caddy 2>/dev/null || echo "No Caddy logs available"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+echo ""
+echo "--- FastAPI Logs ---"
+docker-compose logs --tail=20 fastapi 2>/dev/null || echo "No FastAPI logs available"
 fi
 echo ""
 
-echo "--- Backup Logs ---"
+echo "🔄 BACKUP STATUS:"
 if [ -f "$N8N_DIR/files/backup_full/backup.log" ]; then
-    tail -10 $N8N_DIR/files/backup_full/backup.log
+    echo "Last backup log entries:"
+    tail -n 10 "$N8N_DIR/files/backup_full/backup.log"
 else
-    echo "Chưa có log backup"
+    echo "No backup log found"
 fi
 echo ""
 
-echo "🔧 TROUBLESHOOTING SUGGESTIONS:"
-echo "1. Nếu containers không chạy: cd $N8N_DIR && docker-compose restart"
-echo "2. Nếu SSL lỗi: cd $N8N_DIR && docker-compose restart caddy"
-echo "3. Nếu domain không resolve: Kiểm tra DNS settings"
-echo "4. Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
-echo "5. Xem logs chi tiết: cd $N8N_DIR && docker-compose logs [service_name]"
+echo "📊 SYSTEM RESOURCES:"
+echo "Memory usage:"
+free -h
 echo ""
-echo "✅ Hoàn tất chẩn đoán!"
+echo "CPU usage:"
+top -bn1 | grep "Cpu(s)" || echo "CPU info not available"
+echo ""
+
+echo "✅ Chẩn đoán hoàn tất!"
+echo "======================================================================"
 EOF
+
+# Đặt quyền thực thi cho các script
+chmod +x $N8N_DIR/backup-workflows.sh
+chmod +x $N8N_DIR/backup-manual.sh
 chmod +x $N8N_DIR/troubleshoot.sh
 
 # Đặt quyền cho thư mục n8n
-echo "Đặt quyền cho thư mục n8n tại $N8N_DIR..."
+echo "🔄 Đặt quyền cho thư mục n8n tại $N8N_DIR..."
 chown -R 1000:1000 $N8N_DIR 
 chmod -R u+rwX,g+rX,o+rX $N8N_DIR
 chown -R 1000:1000 $N8N_DIR/files
 chmod -R u+rwX,g+rX,o+rX $N8N_DIR/files
 
 # Khởi động các container
-echo "Khởi động các container... Quá trình build image có thể mất vài phút..."
+echo "🔄 Khởi động các container... Quá trình build image có thể mất vài phút..."
 cd $N8N_DIR
 
 # Xác định lệnh docker-compose
@@ -1375,88 +1374,101 @@ if command -v docker-compose &> /dev/null; then
 elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
     DOCKER_COMPOSE_CMD="docker compose"
 else
-    echo "Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose plugin."
+    echo "❌ Lỗi: Không tìm thấy lệnh docker-compose hoặc docker compose plugin."
     exit 1
 fi
 
-echo "Đang build Docker images... (có thể mất vài phút)"
+echo "🔄 Đang build Docker images... (có thể mất vài phút)"
 if ! $DOCKER_COMPOSE_CMD build; then
-    echo "Cảnh báo: Build Docker images thất bại."
-    echo "Đang thử build lại với cấu hình đơn giản hơn..."
+    echo "⚠️ Cảnh báo: Build Docker images thất bại."
+    echo "🔄 Đang thử build lại với cấu hình đơn giản hơn..."
     
-    # Sử dụng Dockerfile.simple cho n8n
+    # Tạo Dockerfile đơn giản hơn
+    cat << 'EOF' > $N8N_DIR/Dockerfile.simple
+FROM n8nio/n8n:latest
+USER root
+RUN apk update && \
+    apk add --no-cache ffmpeg wget zip unzip python3 py3-pip jq tar gzip \
+    chromium nss freetype freetype-dev harfbuzz ca-certificates ttf-freefont \
+    font-noto font-noto-cjk font-noto-emoji dbus udev
+RUN pip3 install --break-system-packages -U yt-dlp && \
+    chmod +x /usr/bin/yt-dlp
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+RUN mkdir -p /files/youtube_content_anylystic /files/backup_full /files/temp && \
+    chown -R node:node /files
+USER node
+WORKDIR /home/node
+EOF
+    
+    # Cập nhật docker-compose.yml để sử dụng Dockerfile đơn giản
     sed -i 's/dockerfile: Dockerfile/dockerfile: Dockerfile.simple/' $N8N_DIR/docker-compose.yml
     
     if ! $DOCKER_COMPOSE_CMD build; then
-        echo "Lỗi: Không thể build Docker images thậm chí với cấu hình đơn giản."
-        echo "Kiểm tra kết nối mạng và thử lại."
+        echo "❌ Lỗi: Không thể build Docker image thậm chí với cấu hình đơn giản."
+        echo "🔍 Kiểm tra kết nối mạng và thử lại."
         exit 1
     fi
     echo "✅ Build thành công với cấu hình đơn giản."
 fi
 
-echo "Đang khởi động các container..."
+echo "🚀 Đang khởi động các container..."
 if ! $DOCKER_COMPOSE_CMD up -d; then
-    echo "Lỗi: Khởi động container thất bại."
-    echo "Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
+    echo "❌ Lỗi: Khởi động container thất bại."
+    echo "🔍 Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
     exit 1
 fi
 
-echo "Đợi các container khởi động và SSL được cấp (60 giây)..."
+echo "⏳ Đợi các container khởi động và SSL được cấp (60 giây)..."
 sleep 60
 
-# Kiểm tra các container đã chạy chưa
-echo "Kiểm tra trạng thái các container..."
+# Kiểm tra trạng thái containers
+echo "🔍 Kiểm tra trạng thái các container..."
 if $DOCKER_COMPOSE_CMD ps | grep -q "n8n"; then
     echo "✅ Container n8n đã chạy thành công."
 else
-    echo "⚠️ Container n8n có thể chưa chạy. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs n8n"
+    echo "⚠️ Cảnh báo: Container n8n có thể chưa chạy. Kiểm tra: $DOCKER_COMPOSE_CMD logs n8n"
 fi
 
 if $DOCKER_COMPOSE_CMD ps | grep -q "caddy"; then
     echo "✅ Container caddy đã chạy thành công."
 else
-    echo "⚠️ Container caddy có thể chưa chạy. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs caddy"
+    echo "⚠️ Cảnh báo: Container caddy có thể chưa chạy. Kiểm tra: $DOCKER_COMPOSE_CMD logs caddy"
 fi
 
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]] && $DOCKER_COMPOSE_CMD ps | grep -q "fastapi"; then
-    echo "✅ Container FastAPI đã chạy thành công."
-elif [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "⚠️ Container FastAPI có thể chưa chạy. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs fastapi"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]] && $DOCKER_COMPOSE_CMD ps | grep -q "fastapi"; then
+    echo "✅ Container fastapi đã chạy thành công."
+elif [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+    echo "⚠️ Cảnh báo: Container fastapi có thể chưa chạy. Kiểm tra: $DOCKER_COMPOSE_CMD logs fastapi"
 fi
 
 # Kiểm tra SSL
-echo "🔒 Kiểm tra SSL certificates..."
-sleep 10
-if curl -s -I https://$DOMAIN | grep -q "200 OK"; then
+echo "🔒 Kiểm tra SSL certificate..."
+if curl -I https://$DOMAIN 2>/dev/null | grep -q "200 OK"; then
     echo "✅ SSL cho $DOMAIN hoạt động bình thường."
 else
-    echo "⚠️ SSL cho $DOMAIN có thể chưa sẵn sàng. Đợi thêm vài phút và thử lại."
+    echo "⚠️ Cảnh báo: SSL cho $DOMAIN có thể chưa sẵn sàng. Đợi thêm vài phút."
 fi
 
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    if curl -s -I https://$API_DOMAIN | grep -q "200 OK"; then
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+    if curl -I https://$API_DOMAIN 2>/dev/null | grep -q "200 OK"; then
         echo "✅ SSL cho $API_DOMAIN hoạt động bình thường."
     else
-        echo "⚠️ SSL cho $API_DOMAIN có thể chưa sẵn sàng. Đợi thêm vài phút và thử lại."
+        echo "⚠️ Cảnh báo: SSL cho $API_DOMAIN có thể chưa sẵn sàng. Đợi thêm vài phút."
     fi
 fi
 
 # Tạo script cập nhật tự động
-echo "Tạo script cập nhật tự động tại $N8N_DIR/update-n8n.sh..."
-cat << EOF > $N8N_DIR/update-n8n.sh
+if [ "$AUTO_UPDATE_ENABLED" = true ]; then
+    echo "🔄 Tạo script cập nhật tự động tại $N8N_DIR/update-n8n.sh..."
+    cat << EOF > $N8N_DIR/update-n8n.sh
 #!/bin/bash
 N8N_DIR_VALUE="$N8N_DIR"
 LOG_FILE="\$N8N_DIR_VALUE/update.log"
-ENABLE_AUTO_UPDATE="$ENABLE_AUTO_UPDATE"
 
-log() { echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> "\$LOG_FILE"; }
-
-# Kiểm tra nếu auto-update bị tắt
-if [[ "\$ENABLE_AUTO_UPDATE" =~ ^[Nn]\$ ]]; then
-    log "Auto-update bị tắt. Bỏ qua cập nhật."
-    exit 0
-fi
+log() { 
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" >> "\$LOG_FILE"
+}
 
 log "Bắt đầu kiểm tra cập nhật..."
 cd "\$N8N_DIR_VALUE"
@@ -1472,34 +1484,31 @@ fi
 
 log "Cập nhật yt-dlp trên host..."
 if command -v pipx &> /dev/null; then 
-    pipx upgrade yt-dlp > /dev/null 2>&1
+    pipx upgrade yt-dlp
 elif [ -d "/opt/yt-dlp-venv" ]; then 
-    /opt/yt-dlp-venv/bin/pip install -U yt-dlp > /dev/null 2>&1
+    /opt/yt-dlp-venv/bin/pip install -U yt-dlp
 fi
 
 log "Kéo image n8nio/n8n mới nhất..."
-docker pull n8nio/n8n:latest > /dev/null 2>&1
+docker pull n8nio/n8n:latest
 
-CURRENT_CUSTOM_IMAGE_ID="\$(docker images -q n8n-custom-ffmpeg 2>/dev/null)"
+CURRENT_CUSTOM_IMAGE_ID="\$(docker images -q n8n-custom-ffmpeg:latest)"
 log "Build lại image custom n8n..."
-if ! \$DOCKER_COMPOSE build n8n > /dev/null 2>&1; then 
+if ! \$DOCKER_COMPOSE build n8n; then 
     log "Lỗi build image custom."
     exit 1
 fi
 
-NEW_CUSTOM_IMAGE_ID="\$(docker images -q n8n-custom-ffmpeg 2>/dev/null)"
+NEW_CUSTOM_IMAGE_ID="\$(docker images -q n8n-custom-ffmpeg:latest)"
 if [ "\$CURRENT_CUSTOM_IMAGE_ID" != "\$NEW_CUSTOM_IMAGE_ID" ]; then
     log "Phát hiện image mới, tiến hành cập nhật n8n..."
-    
-    # Chạy backup trước khi cập nhật
     log "Chạy backup trước khi cập nhật..."
     if [ -x "\$N8N_DIR_VALUE/backup-workflows.sh" ]; then
         "\$N8N_DIR_VALUE/backup-workflows.sh"
     fi
-    
     log "Dừng và khởi động lại containers..."
-    \$DOCKER_COMPOSE down > /dev/null 2>&1
-    \$DOCKER_COMPOSE up -d > /dev/null 2>&1
+    \$DOCKER_COMPOSE down
+    \$DOCKER_COMPOSE up -d
     log "Cập nhật n8n hoàn tất."
 else
     log "Không có cập nhật mới cho image n8n custom."
@@ -1508,72 +1517,54 @@ fi
 log "Cập nhật yt-dlp trong container n8n..."
 N8N_CONTAINER_FOR_UPDATE="\$(docker ps -q --filter name=n8n)"
 if [ -n "\$N8N_CONTAINER_FOR_UPDATE" ]; then
-    docker exec -u root \$N8N_CONTAINER_FOR_UPDATE pip3 install --break-system-packages -U yt-dlp > /dev/null 2>&1
+    docker exec -u root \$N8N_CONTAINER_FOR_UPDATE pip3 install --break-system-packages -U yt-dlp
     log "yt-dlp trong container đã được cập nhật."
+else
+    log "Không tìm thấy container n8n đang chạy."
 fi
 
 log "Kiểm tra cập nhật hoàn tất."
 EOF
-chmod +x $N8N_DIR/update-n8n.sh
+    chmod +x $N8N_DIR/update-n8n.sh
+fi
 
-# Thiết lập cron job
+# Thiết lập cron jobs
 CRON_USER=$(whoami)
-BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
-
-if [[ "$ENABLE_AUTO_UPDATE" =~ ^[Yy]$ ]]; then
+if [ "$AUTO_UPDATE_ENABLED" = true ]; then
     UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
+    BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
     (crontab -u $CRON_USER -l 2>/dev/null | grep -v "update-n8n.sh" | grep -v "backup-workflows.sh"; echo "$UPDATE_CRON"; echo "$BACKUP_CRON") | crontab -u $CRON_USER -
-    echo "✅ Đã thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày."
+    echo "✅ Đã thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày lúc 2:00 AM."
 else
+    BACKUP_CRON="0 2 * * * $N8N_DIR/backup-workflows.sh"
     (crontab -u $CRON_USER -l 2>/dev/null | grep -v "update-n8n.sh" | grep -v "backup-workflows.sh"; echo "$BACKUP_CRON") | crontab -u $CRON_USER -
-    echo "✅ Đã thiết lập cron job sao lưu hàng ngày (auto-update bị tắt)."
+    echo "✅ Đã thiết lập cron job sao lưu hàng ngày lúc 2:00 AM."
 fi
 
 echo "======================================================================"
 echo "🎉 N8N ĐÃ ĐƯỢC CÀI ĐẶT THÀNH CÔNG!"
 echo "======================================================================"
-echo ""
-echo "🌐 Truy cập N8N tại: https://${DOMAIN}"
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "📰 Truy cập News API tại: https://${API_DOMAIN}"
-    echo "🔑 Bearer Token: $NEWS_API_TOKEN"
-    echo "📚 API Docs: https://${API_DOMAIN}/docs"
+echo "🌐 Truy cập N8N: https://${DOMAIN}"
+if [[ "$INSTALL_FASTAPI" =~ ^[Yy]$ ]]; then
+echo "📰 Truy cập News API: https://${API_DOMAIN}"
+echo "📚 API Documentation: https://${API_DOMAIN}/docs"
+echo "🔑 Bearer Token: $BEARER_TOKEN"
 fi
 echo ""
-echo "📊 THÔNG TIN HỆ THỐNG:"
+echo "📁 Thư mục cài đặt: $N8N_DIR"
+echo "🔧 Script chẩn đoán: $N8N_DIR/troubleshoot.sh"
+echo "🧪 Test backup: $N8N_DIR/backup-manual.sh"
+echo ""
 if [ "$(swapon --show | wc -l)" -gt 0 ]; then
     SWAP_INFO=$(free -h | grep Swap | awk '{print $2}')
     echo "💾 Swap: $SWAP_INFO"
 fi
-echo "📁 Thư mục cài đặt: $N8N_DIR"
-echo "🎬 Thư mục video: $N8N_DIR/files/youtube_content_anylystic/"
+echo "🔄 Auto-update: $([ "$AUTO_UPDATE_ENABLED" = true ] && echo "Enabled (mỗi 12h)" || echo "Disabled")"
+echo "📱 Telegram backup: $([ -f "$TELEGRAM_CONF_FILE" ] && echo "Enabled" || echo "Disabled")"
+echo "💾 Backup tự động: Hàng ngày lúc 2:00 AM"
+echo "📂 Backup location: $N8N_DIR/files/backup_full/"
 echo ""
-echo "🔄 TÍNH NĂNG TỰ ĐỘNG:"
-if [[ "$ENABLE_AUTO_UPDATE" =~ ^[Yy]$ ]]; then
-    echo "✅ Auto-update: Mỗi 12 giờ (Log: $N8N_DIR/update.log)"
-else
-    echo "❌ Auto-update: Đã tắt"
-fi
-echo "💾 Backup: Hàng ngày lúc 2:00 AM"
-echo "📁 File backup: $N8N_DIR/files/backup_full/"
-echo "📋 Log backup: $N8N_DIR/files/backup_full/backup.log"
-if [ -f "$TELEGRAM_CONF_FILE" ]; then
-    echo "📱 Telegram: Đã cấu hình (file <20MB sẽ được gửi)"
-fi
-echo ""
-echo "🛠️ LỆNH HỮU ÍCH:"
-echo "🧪 Test backup: $N8N_DIR/backup-manual.sh"
-echo "🔍 Chẩn đoán: $N8N_DIR/troubleshoot.sh"
-echo "📊 Xem logs: cd $N8N_DIR && docker-compose logs -f"
-echo "🔄 Restart: cd $N8N_DIR && docker-compose restart"
-echo ""
-if [[ "$INSTALL_NEWS_API" =~ ^[Yy]$ ]]; then
-    echo "🔧 ĐỔI BEARER TOKEN:"
-    echo "cd $N8N_DIR && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=\"NEW_TOKEN\"/' docker-compose.yml && docker-compose restart fastapi"
-    echo ""
-fi
-echo "👨‍💻 TÁC GIẢ: Nguyễn Ngọc Thiện"
+echo "🚀 Tác giả: Nguyễn Ngọc Thiện"
 echo "📺 YouTube: https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1"
-echo "📘 Facebook: https://www.facebook.com/Ban.Thien.Handsome/"
 echo "📱 Zalo: 08.8888.4749"
 echo "======================================================================"
