@@ -3,6 +3,21 @@
 # Hiển thị banner
 echo "======================================================================"
 echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
+echo "                    Tác giả: Nguyễn Ngọc Thiện                        "
+echo "      YouTube: https://www.youtube.com/@kalvinthiensocial             "
+echo "======================================================================"
+echo ""
+echo "🎯 Kênh YouTube của mình đang cần sự ủng hộ từ mọi người!"
+echo "🔔 Hãy ĐĂNG KÝ kênh để giúp mình phát triển và làm thêm nhiều video hữu ích:"
+echo "   ➤ https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1"
+echo ""
+echo "📺 Playlist N8N đầy đủ tại:"
+echo "   ➤ https://www.youtube.com/@kalvinthiensocial/playlists"
+echo ""
+echo "📱 Liên hệ hỗ trợ:"
+echo "   ➤ Facebook: https://www.facebook.com/Ban.Thien.Handsome/"
+echo "   ➤ Zalo/SĐT: 08.8888.4749"
+echo ""
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -78,12 +93,14 @@ show_help() {
     echo "  -h, --help      Hiển thị trợ giúp này"
     echo "  -d, --dir DIR   Chỉ định thư mục cài đặt n8n (mặc định: /home/n8n)"
     echo "  -s, --skip-docker Bỏ qua cài đặt Docker (nếu đã có)"
+    echo "  -l, --localhost Cài đặt cho localhost (không cần domain)"
     exit 0
 }
 
 # Xử lý tham số dòng lệnh
 N8N_DIR="/home/n8n"
 SKIP_DOCKER=false
+LOCALHOST_MODE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -96,6 +113,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -s|--skip-docker)
             SKIP_DOCKER=true
+            shift
+            ;;
+        -l|--localhost)
+            LOCALHOST_MODE=true
             shift
             ;;
         *)
@@ -210,8 +231,26 @@ systemctl start cron
 # Kiểm tra các lệnh cần thiết
 check_commands
 
-# Nhận input domain từ người dùng
-read -p "Nhập tên miền hoặc tên miền phụ của bạn: " DOMAIN
+# Cấu hình domain - hỗ trợ localhost mode
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "🏠 CHẠY Ở CHẾ ĐỘ LOCALHOST"
+    echo "N8N sẽ được cài đặt để chạy trên localhost:5678"
+    echo "Không cần SSL và domain name"
+    DOMAIN="localhost"
+    DOMAIN_MODE="localhost"
+    echo ""
+else
+    read -p "Nhập tên miền hoặc tên miền phụ của bạn (hoặc 'localhost' cho chế độ local): " DOMAIN
+    
+    if [ "$DOMAIN" = "localhost" ] || [ "$DOMAIN" = "127.0.0.1" ]; then
+        echo "🏠 Đã chọn chế độ localhost"
+        LOCALHOST_MODE=true
+        DOMAIN_MODE="localhost"
+    else
+        DOMAIN_MODE="domain"
+        echo "🌐 Đã chọn chế độ domain: $DOMAIN"
+    fi
+fi
 
 # Cấu hình Telegram backup (tùy chọn)
 echo ""
@@ -253,15 +292,29 @@ else
     SETUP_NEWS_API="n"
 fi
 
-# Kiểm tra domain
-echo "Kiểm tra domain $DOMAIN..."
-if check_domain $DOMAIN; then
-    echo "Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
+# Kiểm tra domain (chỉ nếu không phải localhost mode)
+if [ "$LOCALHOST_MODE" != true ]; then
+    echo "Kiểm tra domain $DOMAIN..."
+    if check_domain $DOMAIN; then
+        echo "✅ Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
+    else
+        echo "❌ Domain $DOMAIN chưa được trỏ đến server này."
+        echo "IP hiện tại của server: $(curl -s https://api.ipify.org)"
+        echo ""
+        echo "🔧 TÙY CHỌN KHẮC PHỤC:"
+        echo "1. Cập nhật DNS để trỏ $DOMAIN đến IP server"
+        echo "2. Chạy script với tham số --localhost để dùng localhost"
+        echo "3. Tiếp tục cài đặt (không khuyến nghị - SSL sẽ không hoạt động)"
+        echo ""
+        read -p "Bạn có muốn tiếp tục cài đặt bất chấp lỗi DNS không? (y/n): " CONTINUE_ANYWAY
+        if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
+            echo "Vui lòng sửa DNS hoặc sử dụng --localhost rồi chạy lại script"
+            exit 1
+        fi
+        echo "⚠️ Tiếp tục cài đặt nhưng SSL có thể không hoạt động"
+    fi
 else
-    echo "Domain $DOMAIN chưa được trỏ đến server này."
-    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
-    echo "Sau khi cập nhật DNS, hãy chạy lại script này"
-    exit 1
+    echo "✅ Chế độ localhost - bỏ qua kiểm tra DNS"
 fi
 
 # Cài đặt Docker và Docker Compose
@@ -401,7 +454,50 @@ EOF
 
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
-cat << EOF > $N8N_DIR/docker-compose.yml
+
+if [ "$LOCALHOST_MODE" = true ]; then
+    # Cấu hình cho localhost mode
+    cat << EOF > $N8N_DIR/docker-compose.yml
+# Cấu hình Docker Compose cho N8N (Localhost Mode) với FFmpeg, yt-dlp, và Puppeteer
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: n8n-ffmpeg-latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://localhost:5678
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      # Cấu hình binary data mode
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - N8N_BINARY_DATA_STORAGE=/files
+      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
+      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
+      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
+      # Cấu hình Puppeteer
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    volumes:
+      - ${N8N_DIR}:/home/node/.n8n
+      - ${N8N_DIR}/files:/files
+    user: "1000:1000"
+    cap_add:
+      - SYS_ADMIN  # Thêm quyền cho Puppeteer
+
+volumes:
+  n8n_data:
+EOF
+else
+    # Cấu hình cho domain mode với Caddy
+    cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
   n8n:
@@ -453,14 +549,57 @@ volumes:
   caddy_data:
   caddy_config:
 EOF
+fi
 
-# Tạo file Caddyfile
-echo "Tạo file Caddyfile..."
-cat << EOF > $N8N_DIR/Caddyfile
+# Tạo file Caddyfile (chỉ cho domain mode)
+if [ "$LOCALHOST_MODE" != true ]; then
+    echo "Tạo file Caddyfile..."
+    if [ "$SETUP_NEWS_API" = "y" ]; then
+        # Caddyfile với cả N8N và News API
+        cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
+    
+    # Cấu hình thông tin tác giả trong header
+    header {
+        X-Author "Nguyễn Ngọc Thiện"
+        X-YouTube "https://www.youtube.com/@kalvinthiensocial"
+        X-Facebook "https://www.facebook.com/Ban.Thien.Handsome/"
+        X-Contact "08.8888.4749"
+    }
+}
+
+api.${DOMAIN} {
+    reverse_proxy host.docker.internal:8001
+    
+    # Cấu hình thông tin tác giả trong header
+    header {
+        X-Author "Nguyễn Ngọc Thiện"
+        X-YouTube "https://www.youtube.com/@kalvinthiensocial"
+        X-Facebook "https://www.facebook.com/Ban.Thien.Handsome/"
+        X-Contact "08.8888.4749"
+    }
 }
 EOF
+    else
+        # Caddyfile chỉ có N8N
+        cat << EOF > $N8N_DIR/Caddyfile
+${DOMAIN} {
+    reverse_proxy n8n:5678
+    
+    # Cấu hình thông tin tác giả trong header
+    header {
+        X-Author "Nguyễn Ngọc Thiện"
+        X-YouTube "https://www.youtube.com/@kalvinthiensocial"
+        X-Facebook "https://www.facebook.com/Ban.Thien.Handsome/"
+        X-Contact "08.8888.4749"
+    }
+}
+EOF
+    fi
+else
+    echo "✅ Chế độ localhost - không cần Caddyfile"
+fi
 
 # Tạo script sao lưu workflow và credentials
 echo "Tạo script sao lưu workflow và credentials..."
@@ -624,6 +763,12 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     cat << 'EOF' > $N8N_DIR/news_api/main.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+News Content API - Tác giả: Nguyễn Ngọc Thiện
+YouTube: https://www.youtube.com/@kalvinthiensocial
+Facebook: https://www.facebook.com/Ban.Thien.Handsome/
+Liên hệ: 08.8888.4749
+"""
 
 import os
 import asyncio
@@ -644,48 +789,77 @@ import newspaper
 from newspaper import Article, Source
 
 # Cấu hình
-API_TOKEN = os.getenv("NEWS_API_TOKEN", "your-secret-token-here")
+API_TOKEN = os.getenv("NEWS_API_TOKEN", "demo-token-change-me")
 API_HOST = os.getenv("NEWS_API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("NEWS_API_PORT", "8001"))
 
-# FastAPI app
+# Ẩn token thật trong docs bằng cách tạo fake token cho examples
+DEMO_TOKEN = "demo-token-for-docs-only"
+
+# FastAPI app với thông tin tác giả
 app = FastAPI(
-    title="📰 News Content API",
-    description="API lấy nội dung tin tức sử dụng Newspaper4k",
+    title="📰 News Content API by Nguyễn Ngọc Thiện",
+    description="""
+    🎯 **API lấy nội dung tin tức sử dụng Newspaper4k**
+    
+    ---
+    
+    👨‍💻 **Tác giả:** Nguyễn Ngọc Thiện
+    
+    📺 **YouTube:** [Đăng ký kênh để ủng hộ!](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1)
+    
+    📱 **Facebook:** [Ban.Thien.Handsome](https://www.facebook.com/Ban.Thien.Handsome/)
+    
+    📞 **Liên hệ:** 08.8888.4749 (Zalo/SĐT)
+    
+    🎬 **Playlist N8N:** [Xem playlist đầy đủ](https://www.youtube.com/@kalvinthiensocial/playlists)
+    
+    ---
+    
+    ⚠️ **Lưu ý bảo mật:** Token thật được cấu hình riêng, không hiển thị trong docs này.
+    """,
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    contact={
+        "name": "Nguyễn Ngọc Thiện",
+        "url": "https://www.youtube.com/@kalvinthiensocial",
+        "email": "contact@example.com"
+    }
 )
 
-# Security
-security = HTTPBearer()
+# Security với fake token cho docs
+security = HTTPBearer(description="Nhập Bearer Token để xác thực. Token demo: demo-token-for-docs-only")
 ua = UserAgent()
 
-# Models
+# Models với examples ẩn token thật
 class ArticleRequest(BaseModel):
-    url: HttpUrl = Field(..., description="URL của bài viết cần lấy nội dung")
-    language: Optional[str] = Field("vi", description="Ngôn ngữ của bài viết (vi, en, etc.)")
-    extract_images: Optional[bool] = Field(True, description="Có lấy hình ảnh không")
-    summarize: Optional[bool] = Field(True, description="Có tóm tắt nội dung không")
+    url: HttpUrl = Field(..., description="URL của bài viết cần lấy nội dung", example="https://vnexpress.net/example-article")
+    language: Optional[str] = Field("vi", description="Ngôn ngữ của bài viết (vi, en, etc.)", example="vi")
+    extract_images: Optional[bool] = Field(True, description="Có lấy hình ảnh không", example=True)
+    summarize: Optional[bool] = Field(True, description="Có tóm tắt nội dung không", example=True)
 
 class SourceRequest(BaseModel):
-    url: HttpUrl = Field(..., description="URL của trang tin tức")
-    max_articles: Optional[int] = Field(10, description="Số lượng bài viết tối đa")
-    category_filter: Optional[List[str]] = Field(None, description="Lọc theo danh mục")
+    url: HttpUrl = Field(..., description="URL của trang tin tức", example="https://vnexpress.net")
+    max_articles: Optional[int] = Field(10, description="Số lượng bài viết tối đa", example=10)
+    category_filter: Optional[List[str]] = Field(None, description="Lọc theo danh mục", example=["thoi-su", "kinh-doanh"])
 
 class FeedRequest(BaseModel):
-    url: HttpUrl = Field(..., description="URL của RSS feed")
-    max_articles: Optional[int] = Field(20, description="Số lượng bài viết tối đa")
+    url: HttpUrl = Field(..., description="URL của RSS feed", example="https://vnexpress.net/rss/tin-moi-nhat.rss")
+    max_articles: Optional[int] = Field(20, description="Số lượng bài viết tối đa", example=20)
 
 class MonitorRequest(BaseModel):
-    sources: List[HttpUrl] = Field(..., description="Danh sách URL nguồn tin")
-    keywords: Optional[List[str]] = Field(None, description="Từ khóa cần theo dõi")
-    check_interval: Optional[int] = Field(3600, description="Khoảng thời gian kiểm tra (giây)")
+    sources: List[HttpUrl] = Field(..., description="Danh sách URL nguồn tin", example=["https://vnexpress.net", "https://dantri.com.vn"])
+    keywords: Optional[List[str]] = Field(None, description="Từ khóa cần theo dõi", example=["n8n", "automation"])
+    check_interval: Optional[int] = Field(3600, description="Khoảng thời gian kiểm tra (giây)", example=3600)
 
-# Authentication
+# Authentication với kiểm tra token thật
 async def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Token không hợp lệ")
+        raise HTTPException(
+            status_code=401, 
+            detail="Token không hợp lệ. Vui lòng liên hệ admin để lấy token chính xác."
+        )
     return credentials
 
 # Helper functions
@@ -735,7 +909,13 @@ def safe_extract_content(article_url: str, language: str = "vi") -> Dict:
             "source_url": article.source_url or None,
             "meta_description": article.meta_description or None,
             "meta_keywords": article.meta_keywords or [],
-            "tags": article.tags or []
+            "tags": article.tags or [],
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
     except Exception as e:
         return {
@@ -743,7 +923,13 @@ def safe_extract_content(article_url: str, language: str = "vi") -> Dict:
             "url": article_url,
             "error": str(e),
             "title": None,
-            "text": None
+            "text": None,
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
 
 async def extract_from_source(source_url: str, max_articles: int = 10) -> Dict:
@@ -770,14 +956,26 @@ async def extract_from_source(source_url: str, max_articles: int = 10) -> Dict:
             "total_found": len(source.articles),
             "processed": processed,
             "articles": articles_data,
-            "categories": source.category_urls() if hasattr(source, 'category_urls') else []
+            "categories": source.category_urls() if hasattr(source, 'category_urls') else [],
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
     except Exception as e:
         return {
             "success": False,
             "source_url": source_url,
             "error": str(e),
-            "articles": []
+            "articles": [],
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
 
 def parse_rss_feed(feed_url: str, max_articles: int = 20) -> Dict:
@@ -802,71 +1000,113 @@ def parse_rss_feed(feed_url: str, max_articles: int = 20) -> Dict:
             "feed_title": feed.feed.get("title", ""),
             "feed_description": feed.feed.get("description", ""),
             "articles": articles,
-            "total_articles": len(articles)
+            "total_articles": len(articles),
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
     except Exception as e:
         return {
             "success": False,
             "feed_url": feed_url,
             "error": str(e),
-            "articles": []
+            "articles": [],
+            "_credits": {
+                "api_author": "Nguyễn Ngọc Thiện",
+                "youtube": "https://www.youtube.com/@kalvinthiensocial",
+                "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+                "contact": "08.8888.4749"
+            }
         }
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return """
+    return f"""
     <html>
         <head>
-            <title>📰 News Content API</title>
+            <title>📰 News Content API by Nguyễn Ngọc Thiện</title>
             <style>
-                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-                .header { text-align: center; color: #333; }
-                .api-info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; }
-                .endpoint { background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 5px; }
-                code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; }
+                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }}
+                .container {{ background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }}
+                .header {{ text-align: center; color: #333; margin-bottom: 30px; }}
+                .author-info {{ background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #007bff; }}
+                .api-info {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+                .endpoint {{ background: #e8f5e8; padding: 15px; margin: 10px 0; border-radius: 8px; border-left: 4px solid #28a745; }}
+                code {{ background: #f1f3f4; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', monospace; }}
+                .youtube-btn {{ background: #ff0000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 25px; display: inline-block; margin: 10px 5px; font-weight: bold; }}
+                .facebook-btn {{ background: #1877f2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 25px; display: inline-block; margin: 10px 5px; font-weight: bold; }}
+                .contact {{ background: #28a745; color: white; padding: 8px 16px; text-decoration: none; border-radius: 15px; display: inline-block; margin: 5px; }}
+                .warning {{ background: #fff3cd; border: 1px solid #ffeaa7; color: #856404; padding: 12px; border-radius: 6px; margin: 15px 0; }}
             </style>
         </head>
         <body>
-            <div class="header">
-                <h1>📰 News Content API</h1>
-                <p>API lấy nội dung tin tức sử dụng Newspaper4k</p>
+            <div class="container">
+                <div class="header">
+                    <h1>📰 News Content API</h1>
+                    <p>API lấy nội dung tin tức sử dụng Newspaper4k</p>
+                </div>
+                
+                <div class="author-info">
+                    <h3>👨‍💻 Thông tin tác giả</h3>
+                    <p><strong>Tác giả:</strong> Nguyễn Ngọc Thiện</p>
+                    <div style="text-align: center; margin: 20px 0;">
+                        <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" class="youtube-btn" target="_blank">
+                            🎬 ĐĂNG KÝ KÊNH YOUTUBE
+                        </a>
+                        <a href="https://www.facebook.com/Ban.Thien.Handsome/" class="facebook-btn" target="_blank">
+                            📱 FACEBOOK
+                        </a>
+                        <a href="tel:0888884749" class="contact">📞 08.8888.4749</a>
+                    </div>
+                    <p><strong>📺 Playlist N8N:</strong> <a href="https://www.youtube.com/@kalvinthiensocial/playlists" target="_blank">Xem tất cả video hướng dẫn</a></p>
+                </div>
+                
+                <div class="warning">
+                    <strong>⚠️ Bảo mật:</strong> Token thật được cấu hình riêng và không hiển thị public. 
+                    Token demo trong docs chỉ để tham khảo cấu trúc.
+                </div>
+                
+                <div class="api-info">
+                    <h3>🔐 Xác thực API</h3>
+                    <p>Tất cả API endpoints yêu cầu Bearer Token trong header:</p>
+                    <code>Authorization: Bearer YOUR_REAL_TOKEN</code>
+                    <p><small>* Token được cấp riêng cho từng người dùng</small></p>
+                </div>
+                
+                <div class="endpoint">
+                    <h4>GET /health</h4>
+                    <p>Kiểm tra trạng thái API</p>
+                </div>
+                
+                <div class="endpoint">
+                    <h4>POST /extract-article</h4>
+                    <p>Lấy nội dung chi tiết của một bài viết từ URL</p>
+                </div>
+                
+                <div class="endpoint">
+                    <h4>POST /extract-source</h4>
+                    <p>Lấy nhiều bài viết từ một trang tin tức</p>
+                </div>
+                
+                <div class="endpoint">
+                    <h4>POST /parse-feed</h4>
+                    <p>Phân tích RSS feed và lấy danh sách bài viết</p>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px;">
+                    <a href="/docs" style="background: #007bff; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-size: 18px;">
+                        📚 Xem tài liệu API đầy đủ
+                    </a>
+                </div>
+                
+                <div style="text-align: center; margin-top: 30px; color: #666;">
+                    <p>💡 <strong>Mẹo:</strong> Hãy đăng ký kênh YouTube để học thêm về N8N và automation!</p>
+                </div>
             </div>
-            
-            <div class="api-info">
-                <h3>🔐 Xác thực</h3>
-                <p>Tất cả API endpoints yêu cầu Bearer Token trong header:</p>
-                <code>Authorization: Bearer YOUR_TOKEN</code>
-            </div>
-            
-            <div class="endpoint">
-                <h4>GET /health</h4>
-                <p>Kiểm tra trạng thái API</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /extract-article</h4>
-                <p>Lấy nội dung chi tiết của một bài viết</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /extract-source</h4>
-                <p>Lấy nhiều bài viết từ một trang tin tức</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>POST /parse-feed</h4>
-                <p>Phân tích RSS feed</p>
-            </div>
-            
-            <div class="endpoint">
-                <h4>GET /docs</h4>
-                <p>Tài liệu API chi tiết (Swagger UI)</p>
-            </div>
-            
-            <p style="text-align: center; margin-top: 30px;">
-                <a href="/docs">📚 Xem tài liệu API đầy đủ</a>
-            </p>
         </body>
     </html>
     """
@@ -877,7 +1117,13 @@ async def health_check(credentials: HTTPAuthorizationCredentials = Security(secu
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "1.0.0",
-        "features": ["article_extraction", "source_crawling", "rss_parsing", "content_monitoring"]
+        "features": ["article_extraction", "source_crawling", "rss_parsing", "content_monitoring"],
+        "author": {
+            "name": "Nguyễn Ngọc Thiện",
+            "youtube": "https://www.youtube.com/@kalvinthiensocial",
+            "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+            "contact": "08.8888.4749"
+        }
     }
 
 @app.post("/extract-article")
@@ -945,14 +1191,22 @@ async def get_stats(credentials: HTTPAuthorizationCredentials = Depends(verify_t
         "successful_extractions": "N/A", 
         "failed_extractions": "N/A",
         "uptime": "N/A",
-        "note": "Tính năng thống kê sẽ được bổ sung trong phiên bản sau"
+        "note": "Tính năng thống kê sẽ được bổ sung trong phiên bản sau",
+        "author": {
+            "name": "Nguyễn Ngọc Thiện",
+            "youtube": "https://www.youtube.com/@kalvinthiensocial",
+            "facebook": "https://www.facebook.com/Ban.Thien.Handsome/",
+            "contact": "08.8888.4749"
+        }
     }
 
 if __name__ == "__main__":
     import uvicorn
     print(f"🚀 Khởi động News Content API tại http://{API_HOST}:{API_PORT}")
     print(f"📚 Tài liệu API: http://{API_HOST}:{API_PORT}/docs")
-    print(f"🔑 Bearer Token: {API_TOKEN}")
+    print(f"👨‍💻 Tác giả: Nguyễn Ngọc Thiện")
+    print(f"📺 YouTube: https://www.youtube.com/@kalvinthiensocial")
+    print(f"🔒 Token được ẩn để bảo mật")
     
     uvicorn.run(
         "main:app",
@@ -978,22 +1232,32 @@ source venv/bin/activate
 python main.py
 EOF
 
-    # Tạo service systemd cho News API
+    # Tạo service systemd cho News API (cải tiến)
     cat << EOF > /etc/systemd/system/news-api.service
 [Unit]
-Description=News Content API Service
-After=network.target
+Description=News Content API Service by Nguyễn Ngọc Thiện
+After=network.target docker.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
+Group=root
 WorkingDirectory=$N8N_DIR/news_api
 Environment=NEWS_API_TOKEN=$NEWS_API_TOKEN
 Environment=NEWS_API_HOST=0.0.0.0
 Environment=NEWS_API_PORT=8001
+Environment=PYTHONPATH=$N8N_DIR/news_api
+ExecStartPre=/bin/bash -c 'until nc -z localhost 8001 2>/dev/null || [ \$((SECONDS)) -gt 30 ]; do sleep 1; done || true'
 ExecStart=$N8N_DIR/news_api/venv/bin/python $N8N_DIR/news_api/main.py
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=news-api
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
@@ -1003,23 +1267,37 @@ EOF
     chmod +x $N8N_DIR/news_api/start_news_api.sh
     chmod +x $N8N_DIR/news_api/main.py
     
-    # Khởi động service
+    # Reload daemon và khởi động service
     systemctl daemon-reload
     systemctl enable news-api
+    
+    # Kiểm tra port 8001 có bị chiếm không trước khi start
+    if netstat -tuln | grep -q ":8001\s"; then
+        echo "⚠️ Cổng 8001 đang được sử dụng, đang dừng process cũ..."
+        pkill -f "python.*main.py" 2>/dev/null || true
+        sleep 3
+    fi
+    
     systemctl start news-api
     
-    # Cập nhật Caddyfile để thêm subdomain api
-    cat << EOF > $N8N_DIR/Caddyfile
-${DOMAIN} {
-    reverse_proxy n8n:5678
-}
-
-api.${DOMAIN} {
-    reverse_proxy localhost:8001
-}
-EOF
-
-    echo "✅ News API đã được tạo và khởi động thành công"
+    # Đợi service khởi động và kiểm tra
+    echo "⏳ Đợi News API khởi động..."
+    sleep 10
+    
+    if systemctl is-active --quiet news-api; then
+        echo "✅ News API đã khởi động thành công"
+        echo "🔍 Kiểm tra kết nối API..."
+        if curl -s http://localhost:8001/health > /dev/null 2>&1; then
+            echo "✅ API đang hoạt động và có thể truy cập"
+        else
+            echo "⚠️ API đã start nhưng chưa thể truy cập, có thể cần thêm thời gian"
+        fi
+    else
+        echo "❌ News API không khởi động được"
+        echo "📋 Kiểm tra logs: journalctl -u news-api -f"
+    fi
+    
+    echo "✅ News API setup hoàn tất"
 fi
 
 # Đặt quyền cho thư mục n8n
@@ -1412,10 +1690,21 @@ echo "======================================================================"
 echo "🎉 N8N ĐÃ ĐƯỢC CÀI ĐẶT VÀ CẤU HÌNH THÀNH CÔNG!"
 echo "======================================================================"
 echo ""
-echo "🌐 TRUY CẬP N8N:"
-echo "  - URL chính: https://${DOMAIN}"
-if [ "$CADDY_PORT" = "8080" ]; then
-    echo "  - URL phụ: http://${DOMAIN}:8080"
+
+# Hiển thị thông tin truy cập dựa trên mode
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "🏠 TRUY CẬP N8N (LOCALHOST MODE):"
+    echo "  - URL: http://localhost:5678"
+    echo "  - Chế độ: Local development (không cần SSL)"
+    echo "  - Phù hợp cho: WSL, Ubuntu Desktop, development"
+else
+    echo "🌐 TRUY CẬP N8N (DOMAIN MODE):"
+    echo "  - URL chính: https://${DOMAIN}"
+    if [ "$CADDY_PORT" = "8080" ]; then
+        echo "  - URL phụ: http://${DOMAIN}:8080"
+    fi
+    echo "  - SSL: Tự động với Let's Encrypt"
+    echo "  - Phù hợp cho: Production, server VPS"
 fi
 echo ""
 
@@ -1432,7 +1721,13 @@ fi
 echo "📁 THÔNG TIN HỆ THỐNG:"
 echo "  - Thư mục cài đặt: $N8N_DIR"
 echo "  - Container runtime: Docker"
-echo "  - Reverse proxy: Caddy (tự động SSL)"
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "  - Reverse proxy: Không dùng (localhost mode)"
+    echo "  - SSL: Không cần (HTTP)"
+else
+    echo "  - Reverse proxy: Caddy (tự động SSL)"
+    echo "  - SSL: Let's Encrypt"
+fi
 echo ""
 
 echo "🔄 TÍNH NĂNG TỰ ĐỘNG CẬP NHẬT:"
@@ -1464,17 +1759,27 @@ fi
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "📰 NEWS CONTENT API:"
-    echo "  - URL API: https://api.${DOMAIN}"
-    echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
-    echo "  - Bearer Token: $NEWS_API_TOKEN"
+    if [ "$LOCALHOST_MODE" = true ]; then
+        echo "  - URL API: http://localhost:8001"
+        echo "  - Docs/Testing: http://localhost:8001/docs"
+    else
+        echo "  - URL API: https://api.${DOMAIN}"
+        echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
+    fi
+    echo "  - Bearer Token: ********** (ẩn để bảo mật)"
+    echo "  - Token được lưu trong env vars"
     echo "  - Trạng thái: $NEWS_API_STATUS"
     echo "  - Chức năng: Lấy nội dung tin tức với Newspaper4k"
     echo ""
     echo "  📋 CÁCH SỬ DỤNG NEWS API TRONG N8N:"
     echo "  1. Tạo HTTP Request node trong workflow"
     echo "  2. Method: POST"
-    echo "  3. URL: https://api.${DOMAIN}/extract-article"
-    echo "  4. Headers: Authorization: Bearer $NEWS_API_TOKEN"
+    if [ "$LOCALHOST_MODE" = true ]; then
+        echo "  3. URL: http://localhost:8001/extract-article"
+    else
+        echo "  3. URL: https://api.${DOMAIN}/extract-article"
+    fi
+    echo "  4. Headers: Authorization: Bearer [TOKEN_ĐƯỢC_CẤU_HÌNH]"
     echo "  5. Body: {\"url\": \"https://example.com/news-article\"}"
     echo ""
 fi
@@ -1489,8 +1794,13 @@ echo ""
 
 echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
 echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
-echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
-echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
+    echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
+else
+    echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
+    echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
+fi
 echo "  - 💾 Backup thủ công: $N8N_DIR/backup-workflows.sh"
 echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
 echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
@@ -1525,31 +1835,173 @@ echo "  - Đổi mật khẩu đăng nhập N8N sau khi truy cập lần đầu"
 echo "  - Backup định kỳ các workflow quan trọng"
 echo "  - Giám sát logs hệ thống thường xuyên"
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - Giữ bí mật Bearer Token của News API: $NEWS_API_TOKEN"
+    echo "  - Bearer Token được ẩn và lưu trong system environment"
 fi
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "  - Chế độ localhost: Chỉ truy cập được từ máy local"
+    echo "  - Phù hợp cho development và testing"
+else
+    echo "  - Đảm bảo domain được cấu hình DNS đúng"
+    echo "  - SSL certificate sẽ tự động gia hạn"
+fi
+echo ""
 
 # Thông báo đặc biệt về Puppeteer nếu không khả dụng
 if [[ "$PUPPETEER_INSTALL_STATUS" == *"Không khả dụng"* ]] || [[ "$PUPPETEER_INSTALL_STATUS" == *"Lỗi cài đặt"* ]]; then
-    echo ""
     echo "⚠️  THÔNG BÁO VỀ PUPPETEER:"
     echo "  - Puppeteer/Chromium không cài đặt thành công"
     echo "  - Các workflow sử dụng tự động hóa trình duyệt sẽ không hoạt động"
     echo "  - Tất cả tính năng khác của N8N vẫn hoạt động bình thường"
     echo "  - Bạn có thể thử cài đặt lại bằng cách chạy script một lần nữa"
+    echo ""
+fi
+
+if [ "$LOCALHOST_MODE" = true ]; then
+    echo "⏱️  LƯU Ý LOCALHOST MODE:"
+    echo "  - N8N có thể cần 1-2 phút để khởi động hoàn toàn"
+    echo "  - Truy cập tại: http://localhost:5678"
+    echo "  - Không cần cấu hình SSL hay DNS"
+    echo "  - Phù hợp cho WSL, Ubuntu Desktop, development"
+    echo "  - Để chuyển sang domain mode, chạy lại script không dùng --localhost"
+else
+    echo "⏱️  LƯU Ý DOMAIN MODE:"
+    echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
+    echo "  - SSL certificate tự động có thể mất 5-10 phút để cấu hình"
+    echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
+    echo "  - Để chuyển sang localhost mode, chạy lại script với --localhost"
 fi
 echo ""
 
-echo "⏱️  LƯU Ý KHỞI ĐỘNG:"
-echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
-echo "  - SSL certificate tự động có thể mất 5-10 phút để cấu hình"
-echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
-echo ""
-
 echo "👨‍💻 THÔNG TIN TÁC GIẢ:"
-echo "  - Script gốc: Nguyễn Ngọc Thiện"
-echo "  - YouTube: @EtoolsAICONTENT"
-echo "  - Phiên bản cải tiến: Tích hợp News API + Telegram Backup"
+echo "  - Tác giả: Nguyễn Ngọc Thiện"
+echo "  - 📺 YouTube: https://www.youtube.com/@kalvinthiensocial"
+echo "  - 🎬 Playlist N8N: https://www.youtube.com/@kalvinthiensocial/playlists"
+echo "  - 📱 Facebook: https://www.facebook.com/Ban.Thien.Handsome/"
+echo "  - 📞 Zalo/SĐT: 08.8888.4749"
+echo "  - 🔔 Hãy đăng ký kênh YouTube để ủng hộ tác giả!"
 echo ""
 echo "======================================================================"
 echo "🎯 CÀI ĐẶT HOÀN TẤT! CHÚC BẠN SỬ DỤNG N8N HIỆU QUẢ!"
 echo "======================================================================"
+
+# Tạo README.md với thông tin tác giả
+echo "Tạo file README.md..."
+cat << EOF > $N8N_DIR/README.md
+# N8N Installation Script - Tác giả: Nguyễn Ngọc Thiện
+
+## 🎯 Giới thiệu
+
+Script tự động cài đặt N8N với đầy đủ tính năng:
+- ✅ N8N Workflow Automation  
+- ✅ FFmpeg (xử lý video/audio)
+- ✅ yt-dlp (tải video YouTube)
+- ✅ Puppeteer + Chromium (tự động hóa trình duyệt)
+- ✅ News Content API (lấy nội dung tin tức)
+- ✅ SSL tự động với Caddy
+- ✅ Backup tự động và gửi qua Telegram
+- ✅ Hỗ trợ cả localhost và domain mode
+
+## 👨‍💻 Thông tin tác giả
+
+**Nguyễn Ngọc Thiện**
+
+### 📺 Kênh YouTube (Hãy đăng ký để ủng hộ!)
+🔔 **[ĐĂNG KÝ KÊNH NGAY!](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1)**
+
+### 🎬 Playlist N8N đầy đủ
+📚 [Xem tất cả video hướng dẫn N8N](https://www.youtube.com/@kalvinthiensocial/playlists)
+
+### 📱 Liên hệ
+- **Facebook:** [Ban.Thien.Handsome](https://www.facebook.com/Ban.Thien.Handsome/)
+- **Zalo/SĐT:** 08.8888.4749
+
+---
+
+## 🚀 Cách sử dụng script
+
+### Cài đặt với domain (Production)
+\`\`\`bash
+sudo bash auto_cai_dat_n8n.sh
+\`\`\`
+
+### Cài đặt localhost (Development/WSL)
+\`\`\`bash
+sudo bash auto_cai_dat_n8n.sh --localhost
+\`\`\`
+
+### Tùy chọn khác
+\`\`\`bash
+sudo bash auto_cai_dat_n8n.sh --help
+\`\`\`
+
+## 🌟 Tính năng nổi bật
+
+### 🏠 Localhost Mode
+- Phù hợp cho WSL Ubuntu, development
+- Không cần domain hay SSL
+- Truy cập tại: http://localhost:5678
+
+### 🌐 Domain Mode  
+- Phù hợp cho production VPS
+- SSL tự động với Let's Encrypt
+- Reverse proxy với Caddy
+
+### 📰 News Content API
+- Lấy nội dung bài viết từ URL
+- Hỗ trợ RSS feed parsing
+- Token bảo mật ẩn trong docs
+
+### 📱 Telegram Backup
+- Tự động backup hàng ngày
+- Gửi file backup qua Telegram
+- Giữ lại 30 bản backup gần nhất
+
+## 🛠️ Quản lý hệ thống
+
+### Khắc phục sự cố
+\`\`\`bash
+$N8N_DIR/troubleshoot.sh
+\`\`\`
+
+### Xem logs
+\`\`\`bash
+cd $N8N_DIR && docker-compose logs -f
+\`\`\`
+
+### Restart services
+\`\`\`bash
+cd $N8N_DIR && docker-compose restart
+\`\`\`
+
+### Backup thủ công
+\`\`\`bash
+$N8N_DIR/backup-workflows.sh
+\`\`\`
+
+## 🎬 Video hướng dẫn
+
+Xem video hướng dẫn chi tiết tại:
+👉 **[Playlist N8N](https://www.youtube.com/@kalvinthiensocial/playlists)**
+
+## 🤝 Hỗ trợ
+
+Nếu gặp vấn đề, hãy:
+1. 📺 Xem video hướng dẫn trên YouTube
+2. 📱 Liên hệ qua Facebook hoặc Zalo
+3. 🔔 Đăng ký kênh để nhận video mới nhất
+
+## 💝 Ủng hộ tác giả
+
+Nếu script này hữu ích, hãy:
+- 🔔 **ĐĂNG KÝ KÊNH YOUTUBE**
+- 👍 Like và comment video
+- 📢 Chia sẻ cho bạn bè
+
+**[👉 ĐĂNG KÝ KÊNH NGAY TẠI ĐÂY!](https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1)**
+
+---
+
+*Cảm ơn bạn đã sử dụng script của Nguyễn Ngọc Thiện! 🙏*
+EOF
+
+echo "✅ Đã tạo README.md với thông tin đầy đủ tại: $N8N_DIR/README.md"
