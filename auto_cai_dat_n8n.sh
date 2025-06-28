@@ -280,7 +280,7 @@ systemctl start cron
 check_commands
 
 # Nhận input domain từ người dùng
-read -p "🌐 Nhập tên miền chính của bạn (ví dụ: google.com ): " DOMAIN
+read -p "🌐 Nhập tên miền chính của bạn (ví dụ: google.vn): " DOMAIN
 while ! check_domain $DOMAIN; do
     echo "❌ Domain $DOMAIN chưa được trỏ đúng đến IP server này ($(curl -s https://api.ipify.org))."
     echo "📝 Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)." 
