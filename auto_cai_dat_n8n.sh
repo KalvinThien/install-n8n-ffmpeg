@@ -290,13 +290,13 @@ cleanup_old_installation() {
     echo "Dừng các container cũ..."
     docker stop $(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
     docker stop $(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
-    docker stop $(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    docker stop $(docker ps -a -q --filter "name=news-api") 2>/dev/null || true
     
     # Xóa containers cũ
     echo "Xóa các container cũ..."
     docker rm $(docker ps -a -q --filter "name=n8n") 2>/dev/null || true
     docker rm $(docker ps -a -q --filter "name=caddy") 2>/dev/null || true
-    docker rm $(docker ps -a -q --filter "name=fastapi") 2>/dev/null || true
+    docker rm $(docker ps -a -q --filter "name=news-api") 2>/dev/null || true
     
     # Xóa images cũ nếu có
     echo "Xóa các image cũ..."
@@ -333,7 +333,7 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile - với tên miền phụ đã nhập để đảm bảo được khởi động đúng
+# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
 echo "Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
@@ -399,228 +399,6 @@ USER node
 WORKDIR /home/node
 EOF
 
-# Tạo file docker-compose.yml 
-echo "Tạo file docker-compose.yml..."
-cat << EOF > $N8N_DIR/docker-compose.yml
-# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
-services:
-  n8n:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: n8n-ffmpeg-latest
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=${DOMAIN}
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${DOMAIN}
-      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      # Cấu hình binary data mode
-      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
-      - N8N_BINARY_DATA_STORAGE=/files
-      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
-      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
-      # Cấu hình Puppeteer
-      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-    volumes:
-      - ${N8N_DIR}:/home/node/.n8n
-      - ${N8N_DIR}/files:/files
-    user: "1000:1000"
-    cap_add:
-      - SYS_ADMIN  # Thêm quyền cho Puppeteer
-  fastapi:
-    build:
-      context: ./news_api
-      dockerfile: Dockerfile
-    image: fastapi-latest
-    restart: always
-    ports:
-      - "8000:8000"
-    environment:
-      - NEWS_API_TOKEN=${NEWS_API_TOKEN}
-      - NEWS_API_HOST=0.0.0.0
-      - NEWS_API_PORT=8000
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ${N8N_DIR}/news_api:/app
-    depends_on:
-      - n8n
-
-  caddy:
-    image: caddy:2
-    restart: always
-    ports:
-      - "8080:80"  
-      - "443:443"
-    volumes:
-      - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - n8n
-
-volumes:
-  caddy_data:
-  caddy_config:
-EOF
-
-# Tạo file Caddyfile
-echo "Tạo file Caddyfile..."
-cat << EOF > $N8N_DIR/Caddyfile
-${DOMAIN} {
-    reverse_proxy n8n:5678
-}
-EOF
-
-# Tạo script sao lưu workflow và credentials
-echo "Tạo script sao lưu workflow và credentials..."
-cat << EOF > $N8N_DIR/backup-workflows.sh
-#!/bin/bash
-
-# Thiết lập biến
-N8N_DIR="$N8N_DIR"
-BACKUP_DIR="\$N8N_DIR/files/backup_full"
-DATE=\$(date +"%Y%m%d_%H%M%S")
-BACKUP_FILE="\$BACKUP_DIR/n8n_backup_\$DATE.tar"
-TEMP_DIR="/tmp/n8n_backup_\$DATE"
-
-# Hàm ghi log
-log() {
-    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a \$BACKUP_DIR/backup.log
-}
-
-# Tạo thư mục backup nếu chưa có
-mkdir -p \$BACKUP_DIR
-
-log "Bắt đầu sao lưu workflows và credentials..."
-
-# Kiểm tra lệnh docker và quyền truy cập
-if ! command -v docker &> /dev/null; then
-    log "Lỗi: Docker chưa được cài đặt"
-    exit 1
-fi
-
-# Xác định lệnh docker phù hợp
-if ! docker ps &>/dev/null; then
-    DOCKER_CMD="sudo docker"
-else
-    DOCKER_CMD="docker"
-fi
-
-# Tìm container n8n
-N8N_CONTAINER=\$(\$DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
-if [ -z "\$N8N_CONTAINER" ]; then
-    log "Lỗi: Không tìm thấy container n8n đang chạy"
-    exit 1
-fi
-
-# Tạo thư mục tạm thời
-mkdir -p \$TEMP_DIR
-mkdir -p \$TEMP_DIR/workflows
-mkdir -p \$TEMP_DIR/credentials
-mkdir -p \$TEMP_DIR/database
-
-# Xuất workflows (với error handling)
-log "Đang xuất workflows..."
-WORKFLOWS=\$(\$DOCKER_CMD exec \$N8N_CONTAINER n8n list:workflows --json 2>/dev/null || echo "[]")
-if [ "\$WORKFLOWS" = "[]" ] || [ -z "\$WORKFLOWS" ]; then
-    log "Cảnh báo: Không tìm thấy workflow nào để sao lưu"
-    echo "[]" > \$TEMP_DIR/workflows/empty_workflows.json
-else
-    # Xuất tất cả workflows thành 1 file
-    echo "\$WORKFLOWS" > \$TEMP_DIR/workflows/all_workflows.json
-    log "Đã xuất \$(echo "\$WORKFLOWS" | jq length) workflows"
-    
-    # Xuất từng workflow riêng lẻ (nếu có thể)
-    echo "\$WORKFLOWS" | jq -c '.[]' 2>/dev/null | while read -r workflow; do
-        id=\$(echo "\$workflow" | jq -r '.id' 2>/dev/null)
-        name=\$(echo "\$workflow" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]' | tr '[:space:]' '_')
-        if [ -n "\$id" ] && [ "\$id" != "null" ]; then
-            \$DOCKER_CMD exec \$N8N_CONTAINER n8n export:workflow --id="\$id" --output="/tmp/workflow_\$id.json" 2>/dev/null || true
-            \$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/workflow_\$id.json \$TEMP_DIR/workflows/\$id-\$name.json 2>/dev/null || true
-        fi
-    done
-fi
-
-# Sao lưu database và credentials từ container
-log "Đang sao lưu database và credentials..."
-\$DOCKER_CMD exec \$N8N_CONTAINER cp /home/node/.n8n/database.sqlite /tmp/database_backup.sqlite 2>/dev/null || true
-\$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/database_backup.sqlite \$TEMP_DIR/database/ 2>/dev/null || true
-
-\$DOCKER_CMD exec \$N8N_CONTAINER cp /home/node/.n8n/config /tmp/config_backup -r 2>/dev/null || true
-\$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/config_backup \$TEMP_DIR/credentials/ 2>/dev/null || true
-
-# Sao lưu toàn bộ thư mục .n8n từ host (volume mount)
-if [ -d "\$N8N_DIR" ]; then
-    log "Đang sao lưu thư mục cấu hình n8n từ host..."
-    cp -r "\$N8N_DIR"/*.sqlite \$TEMP_DIR/database/ 2>/dev/null || true
-    cp -r "\$N8N_DIR"/config \$TEMP_DIR/credentials/ 2>/dev/null || true
-    cp -r "\$N8N_DIR"/nodes \$TEMP_DIR/credentials/ 2>/dev/null || true
-fi
-
-# Tạo file thông tin backup
-cat > \$TEMP_DIR/backup_info.txt << BACKUP_INFO
-Backup Date: \$(date)
-N8N Directory: \$N8N_DIR
-Container ID: \$N8N_CONTAINER
-Workflows Count: \$(echo "\$WORKFLOWS" | jq length 2>/dev/null || echo "0")
-BACKUP_INFO
-
-# Tạo file tar nén
-log "Đang tạo file nén backup..."
-tar -czf \$BACKUP_FILE -C \$(dirname \$TEMP_DIR) \$(basename \$TEMP_DIR)
-
-# Xóa thư mục tạm thời
-rm -rf \$TEMP_DIR
-
-# Kiểm tra kích thước file backup
-if [ -f "\$BACKUP_FILE" ]; then
-    BACKUP_SIZE=\$(du -h "\$BACKUP_FILE" | cut -f1)
-    log "Sao lưu hoàn tất: \$BACKUP_FILE (Kích thước: \$BACKUP_SIZE)"
-else
-    log "Lỗi: Không thể tạo file backup"
-    exit 1
-fi
-
-# Giữ lại tối đa 30 bản sao lưu gần nhất
-log "Dọn dẹp các bản sao lưu cũ..."
-find \$BACKUP_DIR -name "n8n_backup_*.tar" -type f -mtime +30 -delete 2>/dev/null || true
-BACKUP_COUNT=\$(ls -1 \$BACKUP_DIR/n8n_backup_*.tar 2>/dev/null | wc -l)
-log "Hiện có \$BACKUP_COUNT bản sao lưu trong thư mục"
-
-# Gửi backup qua Telegram (nếu được cấu hình)
-if [ -f "\$N8N_DIR/telegram_config.txt" ]; then
-    source "\$N8N_DIR/telegram_config.txt"
-    if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
-        log "Đang gửi backup qua Telegram..."
-        curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendDocument" \
-            -F chat_id="\$TELEGRAM_CHAT_ID" \
-            -F document=@"\$BACKUP_FILE" \
-            -F caption="🔄 Backup N8N tự động - \$(date '+%d/%m/%Y %H:%M:%S')%0AKích thước: \$BACKUP_SIZE" \
-            > /dev/null 2>&1 && log "Đã gửi backup qua Telegram thành công" || log "Lỗi gửi backup qua Telegram"
-    fi
-fi
-
-log "Hoàn tất quá trình sao lưu"
-EOF
-
-# Đặt quyền thực thi cho script sao lưu
-chmod +x $N8N_DIR/backup-workflows.sh
-
-# Lưu cấu hình Telegram nếu có
-if [ "$SETUP_TELEGRAM" = "y" ] && [ -f "/tmp/telegram_config.txt" ]; then
-    echo "Lưu cấu hình Telegram..."
-    mv /tmp/telegram_config.txt $N8N_DIR/telegram_config.txt
-    chmod 600 $N8N_DIR/telegram_config.txt
-fi
-
 # Tạo News API nếu người dùng chọn
 if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "Đang tạo News Content API với FastAPI và Newspaper4k..."
@@ -635,7 +413,7 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     # Cài đặt các thư viện cần thiết
     echo "Cài đặt các thư viện Python cần thiết..."
     $N8N_DIR/news_api/venv/bin/pip install --upgrade pip
-    $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser lxml
+    $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser
     
     # Tạo file main.py cho FastAPI
     cat << 'EOF' > $N8N_DIR/news_api/main.py
@@ -663,7 +441,7 @@ from newspaper import Article, Source
 # Cấu hình
 API_TOKEN = os.getenv("NEWS_API_TOKEN", "your-secret-token-here")
 API_HOST = os.getenv("NEWS_API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("NEWS_API_PORT", "8000"))
+API_PORT = int(os.getenv("NEWS_API_PORT", "8001"))
 
 # FastAPI app
 app = FastAPI(
@@ -987,7 +765,7 @@ EOF
 # Cấu hình môi trường
 export NEWS_API_TOKEN="$NEWS_API_TOKEN"
 export NEWS_API_HOST="0.0.0.0"
-export NEWS_API_PORT="8000"
+export NEWS_API_PORT="8001"
 
 # Khởi động News API
 cd "$N8N_DIR/news_api"
@@ -995,48 +773,313 @@ source venv/bin/activate
 python main.py
 EOF
 
-    # Tạo service systemd cho News API
-    cat << EOF > /etc/systemd/system/news-api.service
-[Unit]
-Description=News Content API Service
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=$N8N_DIR/news_api
-Environment=NEWS_API_TOKEN=$NEWS_API_TOKEN
-Environment=NEWS_API_HOST=0.0.0.0
-Environment=NEWS_API_PORT=8000
-ExecStart=$N8N_DIR/news_api/venv/bin/python $N8N_DIR/news_api/main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
     # Đặt quyền cho các file
     chmod +x $N8N_DIR/news_api/start_news_api.sh
     chmod +x $N8N_DIR/news_api/main.py
-    
-    # Khởi động service
-    systemctl daemon-reload
-    systemctl enable news-api
-    systemctl start news-api
-    
-    # Cập nhật Caddyfile để thêm subdomain api
+fi
+
+# Tạo file docker-compose.yml - CẬP NHẬT VỚI NEWS API TRONG CONTAINER
+echo "Tạo file docker-compose.yml..."
+if [ "$SETUP_NEWS_API" = "y" ]; then
+    cat << EOF > $N8N_DIR/docker-compose.yml
+# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, Puppeteer và News API
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: n8n-ffmpeg-latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${DOMAIN}
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      # Cấu hình binary data mode
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - N8N_BINARY_DATA_STORAGE=/files
+      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
+      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
+      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
+      # Cấu hình Puppeteer
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    volumes:
+      - ${N8N_DIR}:/home/node/.n8n
+      - ${N8N_DIR}/files:/files
+    user: "1000:1000"
+    cap_add:
+      - SYS_ADMIN  # Thêm quyền cho Puppeteer
+    networks:
+      - n8n-network
+
+  # News API Container
+  news-api:
+    image: python:3.11-slim
+    restart: always
+    ports:
+      - "8001:8001"
+    environment:
+      - NEWS_API_TOKEN=${NEWS_API_TOKEN}
+      - NEWS_API_HOST=0.0.0.0
+      - NEWS_API_PORT=8001
+    volumes:
+      - ${N8N_DIR}/news_api:/app
+    working_dir: /app
+    command: >
+      sh -c "
+        apt-get update && 
+        apt-get install -y gcc python3-dev && 
+        pip install --no-cache-dir fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser && 
+        python main.py
+      "
+    networks:
+      - n8n-network
+
+  caddy:
+    image: caddy:2
+    restart: always
+    ports:
+      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
+      - "443:443"
+    volumes:
+      - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - n8n
+      - news-api
+    networks:
+      - n8n-network
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  n8n-network:
+    driver: bridge
+EOF
+else
+    cat << EOF > $N8N_DIR/docker-compose.yml
+# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: n8n-ffmpeg-latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${DOMAIN}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${DOMAIN}
+      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
+      # Cấu hình binary data mode
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - N8N_BINARY_DATA_STORAGE=/files
+      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
+      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
+      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
+      # Cấu hình Puppeteer
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    volumes:
+      - ${N8N_DIR}:/home/node/.n8n
+      - ${N8N_DIR}/files:/files
+    user: "1000:1000"
+    cap_add:
+      - SYS_ADMIN  # Thêm quyền cho Puppeteer
+
+  caddy:
+    image: caddy:2
+    restart: always
+    ports:
+      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
+      - "443:443"
+    volumes:
+      - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - n8n
+
+volumes:
+  caddy_data:
+  caddy_config:
+EOF
+fi
+
+# Tạo file Caddyfile - CẬP NHẬT ĐỂ HỖ TRỢ NEWS API
+echo "Tạo file Caddyfile..."
+if [ "$SETUP_NEWS_API" = "y" ]; then
     cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
 }
 
 api.${DOMAIN} {
-    reverse_proxy localhost:8000
+    reverse_proxy news-api:8001
 }
 EOF
+else
+    cat << EOF > $N8N_DIR/Caddyfile
+${DOMAIN} {
+    reverse_proxy n8n:5678
+}
+EOF
+fi
 
-    echo "✅ News API đã được tạo và khởi động thành công"
+# Tạo script sao lưu workflow và credentials
+echo "Tạo script sao lưu workflow và credentials..."
+cat << EOF > $N8N_DIR/backup-workflows.sh
+#!/bin/bash
+
+# Thiết lập biến
+N8N_DIR="$N8N_DIR"
+BACKUP_DIR="\$N8N_DIR/files/backup_full"
+DATE=\$(date +"%Y%m%d_%H%M%S")
+BACKUP_FILE="\$BACKUP_DIR/n8n_backup_\$DATE.tar"
+TEMP_DIR="/tmp/n8n_backup_\$DATE"
+
+# Hàm ghi log
+log() {
+    echo "[\$(date '+%Y-%m-%d %H:%M:%S')] \$1" | tee -a \$BACKUP_DIR/backup.log
+}
+
+# Tạo thư mục backup nếu chưa có
+mkdir -p \$BACKUP_DIR
+
+log "Bắt đầu sao lưu workflows và credentials..."
+
+# Kiểm tra lệnh docker và quyền truy cập
+if ! command -v docker &> /dev/null; then
+    log "Lỗi: Docker chưa được cài đặt"
+    exit 1
+fi
+
+# Xác định lệnh docker phù hợp
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+else
+    DOCKER_CMD="docker"
+fi
+
+# Tìm container n8n
+N8N_CONTAINER=\$(\$DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
+if [ -z "\$N8N_CONTAINER" ]; then
+    log "Lỗi: Không tìm thấy container n8n đang chạy"
+    exit 1
+fi
+
+# Tạo thư mục tạm thời
+mkdir -p \$TEMP_DIR
+mkdir -p \$TEMP_DIR/workflows
+mkdir -p \$TEMP_DIR/credentials
+mkdir -p \$TEMP_DIR/database
+
+# Xuất workflows (với error handling)
+log "Đang xuất workflows..."
+WORKFLOWS=\$(\$DOCKER_CMD exec \$N8N_CONTAINER n8n list:workflows --json 2>/dev/null || echo "[]")
+if [ "\$WORKFLOWS" = "[]" ] || [ -z "\$WORKFLOWS" ]; then
+    log "Cảnh báo: Không tìm thấy workflow nào để sao lưu"
+    echo "[]" > \$TEMP_DIR/workflows/empty_workflows.json
+else
+    # Xuất tất cả workflows thành 1 file
+    echo "\$WORKFLOWS" > \$TEMP_DIR/workflows/all_workflows.json
+    log "Đã xuất \$(echo "\$WORKFLOWS" | jq length) workflows"
+    
+    # Xuất từng workflow riêng lẻ (nếu có thể)
+    echo "\$WORKFLOWS" | jq -c '.[]' 2>/dev/null | while read -r workflow; do
+        id=\$(echo "\$workflow" | jq -r '.id' 2>/dev/null)
+        name=\$(echo "\$workflow" | jq -r '.name' 2>/dev/null | tr -dc '[:alnum:][:space:]' | tr '[:space:]' '_')
+        if [ -n "\$id" ] && [ "\$id" != "null" ]; then
+            \$DOCKER_CMD exec \$N8N_CONTAINER n8n export:workflow --id="\$id" --output="/tmp/workflow_\$id.json" 2>/dev/null || true
+            \$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/workflow_\$id.json \$TEMP_DIR/workflows/\$id-\$name.json 2>/dev/null || true
+        fi
+    done
+fi
+
+# Sao lưu database và credentials từ container
+log "Đang sao lưu database và credentials..."
+\$DOCKER_CMD exec \$N8N_CONTAINER cp /home/node/.n8n/database.sqlite /tmp/database_backup.sqlite 2>/dev/null || true
+\$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/database_backup.sqlite \$TEMP_DIR/database/ 2>/dev/null || true
+
+\$DOCKER_CMD exec \$N8N_CONTAINER cp /home/node/.n8n/config /tmp/config_backup -r 2>/dev/null || true
+\$DOCKER_CMD cp \$N8N_CONTAINER:/tmp/config_backup \$TEMP_DIR/credentials/ 2>/dev/null || true
+
+# Sao lưu toàn bộ thư mục .n8n từ host (volume mount)
+if [ -d "\$N8N_DIR" ]; then
+    log "Đang sao lưu thư mục cấu hình n8n từ host..."
+    cp -r "\$N8N_DIR"/*.sqlite \$TEMP_DIR/database/ 2>/dev/null || true
+    cp -r "\$N8N_DIR"/config \$TEMP_DIR/credentials/ 2>/dev/null || true
+    cp -r "\$N8N_DIR"/nodes \$TEMP_DIR/credentials/ 2>/dev/null || true
+fi
+
+# Tạo file thông tin backup
+cat > \$TEMP_DIR/backup_info.txt << BACKUP_INFO
+Backup Date: \$(date)
+N8N Directory: \$N8N_DIR
+Container ID: \$N8N_CONTAINER
+Workflows Count: \$(echo "\$WORKFLOWS" | jq length 2>/dev/null || echo "0")
+BACKUP_INFO
+
+# Tạo file tar nén
+log "Đang tạo file nén backup..."
+tar -czf \$BACKUP_FILE -C \$(dirname \$TEMP_DIR) \$(basename \$TEMP_DIR)
+
+# Xóa thư mục tạm thời
+rm -rf \$TEMP_DIR
+
+# Kiểm tra kích thước file backup
+if [ -f "\$BACKUP_FILE" ]; then
+    BACKUP_SIZE=\$(du -h "\$BACKUP_FILE" | cut -f1)
+    log "Sao lưu hoàn tất: \$BACKUP_FILE (Kích thước: \$BACKUP_SIZE)"
+else
+    log "Lỗi: Không thể tạo file backup"
+    exit 1
+fi
+
+# Giữ lại tối đa 30 bản sao lưu gần nhất
+log "Dọn dẹp các bản sao lưu cũ..."
+find \$BACKUP_DIR -name "n8n_backup_*.tar" -type f -mtime +30 -delete 2>/dev/null || true
+BACKUP_COUNT=\$(ls -1 \$BACKUP_DIR/n8n_backup_*.tar 2>/dev/null | wc -l)
+log "Hiện có \$BACKUP_COUNT bản sao lưu trong thư mục"
+
+# Gửi backup qua Telegram (nếu được cấu hình)
+if [ -f "\$N8N_DIR/telegram_config.txt" ]; then
+    source "\$N8N_DIR/telegram_config.txt"
+    if [ -n "\$TELEGRAM_BOT_TOKEN" ] && [ -n "\$TELEGRAM_CHAT_ID" ]; then
+        log "Đang gửi backup qua Telegram..."
+        curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendDocument" \
+            -F chat_id="\$TELEGRAM_CHAT_ID" \
+            -F document=@"\$BACKUP_FILE" \
+            -F caption="🔄 Backup N8N tự động - \$(date '+%d/%m/%Y %H:%M:%S')%0AKích thước: \$BACKUP_SIZE" \
+            > /dev/null 2>&1 && log "Đã gửi backup qua Telegram thành công" || log "Lỗi gửi backup qua Telegram"
+    fi
+fi
+
+log "Hoàn tất quá trình sao lưu"
+EOF
+
+# Đặt quyền thực thi cho script sao lưu
+chmod +x $N8N_DIR/backup-workflows.sh
+
+# Lưu cấu hình Telegram nếu có
+if [ "$SETUP_TELEGRAM" = "y" ] && [ -f "/tmp/telegram_config.txt" ]; then
+    echo "Lưu cấu hình Telegram..."
+    mv /tmp/telegram_config.txt $N8N_DIR/telegram_config.txt
+    chmod 600 $N8N_DIR/telegram_config.txt
 fi
 
 # Đặt quyền cho thư mục n8n
@@ -1150,8 +1193,22 @@ else
     echo ""
 fi
 
+# Kiểm tra container News API
+if [ "$SETUP_NEWS_API" = "y" ]; then
+    NEWS_API_RUNNING=$($DOCKER_CMD ps --filter "name=news-api" --format "{{.Names}}" 2>/dev/null)
+    if [ -n "$NEWS_API_RUNNING" ]; then
+        NEWS_API_STATUS=$($DOCKER_CMD ps --filter "name=news-api" --format "{{.Status}}" 2>/dev/null)
+        echo "✅ Container News API: $NEWS_API_RUNNING - $NEWS_API_STATUS"
+    else
+        echo "❌ Container News API: Không chạy hoặc lỗi khởi động"
+        echo "📋 Kiểm tra logs News API:"
+        echo "   $DOCKER_COMPOSE_CMD logs news-api"
+        echo ""
+    fi
+fi
+
 # Nếu có container không chạy, hiển thị thông tin troubleshooting
-if [ -z "$N8N_RUNNING" ] || [ -z "$CADDY_RUNNING" ]; then
+if [ -z "$N8N_RUNNING" ] || [ -z "$CADDY_RUNNING" ] || ([ "$SETUP_NEWS_API" = "y" ] && [ -z "$NEWS_API_RUNNING" ]); then
     echo "⚠️  Một hoặc nhiều container không chạy. Các bước khắc phục:"
     echo "1. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
     echo "2. Restart containers: $DOCKER_COMPOSE_CMD restart"
@@ -1347,6 +1404,13 @@ echo ">> Caddy Logs (10 dòng cuối):"
 $DOCKER_COMPOSE_CMD logs --tail=10 caddy 2>/dev/null || echo "Không thể lấy logs Caddy"
 echo ""
 
+# Kiểm tra News API nếu có
+if $DOCKER_CMD ps --filter "name=news-api" --format "{{.Names}}" | grep -q "news-api"; then
+    echo ">> News API Logs (10 dòng cuối):"
+    $DOCKER_COMPOSE_CMD logs --tail=10 news-api 2>/dev/null || echo "Không thể lấy logs News API"
+    echo ""
+fi
+
 echo "3. Kiểm tra network connectivity..."
 echo "==================================="
 echo ">> Kiểm tra cổng 5678 (N8N internal):"
@@ -1398,10 +1462,11 @@ FAILED_COMPONENTS=()
 
 # Kiểm tra trạng thái News API
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    if systemctl is-active --quiet news-api; then
-        NEWS_API_STATUS="✅ Đang chạy"
+    NEWS_API_CONTAINER_CHECK=$($DOCKER_CMD ps -q --filter "name=news-api" 2>/dev/null)
+    if [ -n "$NEWS_API_CONTAINER_CHECK" ]; then
+        NEWS_API_STATUS="✅ Đang chạy trong container"
     else
-        NEWS_API_STATUS="❌ Lỗi khởi động"
+        NEWS_API_STATUS="❌ Lỗi khởi động container"
         FAILED_COMPONENTS+=("News API")
     fi
 fi
@@ -1486,6 +1551,7 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "  - Bearer Token: $NEWS_API_TOKEN"
     echo "  - Trạng thái: $NEWS_API_STATUS"
     echo "  - Chức năng: Lấy nội dung tin tức với Newspaper4k"
+    echo "  - Deployment: Docker Container (thay vì systemd service)"
     echo ""
     echo "  📋 CÁCH SỬ DỤNG NEWS API TRONG N8N:"
     echo "  1. Tạo HTTP Request node trong workflow"
@@ -1513,8 +1579,8 @@ echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
 echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - 🔄 Restart News API: systemctl restart news-api"
-    echo "  - 📋 Xem logs News API: journalctl -u news-api -f"
+    echo "  - 🔄 Restart News API: cd $N8N_DIR && docker-compose restart news-api"
+    echo "  - 📋 Xem logs News API: cd $N8N_DIR && docker-compose logs -f news-api"
 fi
 echo ""
 
@@ -1554,18 +1620,32 @@ if [[ "$PUPPETEER_INSTALL_STATUS" == *"Không khả dụng"* ]] || [[ "$PUPPETEE
     echo "  - Tất cả tính năng khác của N8N vẫn hoạt động bình thường"
     echo "  - Bạn có thể thử cài đặt lại bằng cách chạy script một lần nữa"
 fi
+
+# Thông báo về cải tiến News API
+if [ "$SETUP_NEWS_API" = "y" ]; then
+    echo ""
+    echo "🚀 CẢI TIẾN NEWS API:"
+    echo "  - News API hiện chạy trong Docker container thay vì systemd service"
+    echo "  - Tự động cài đặt dependencies khi khởi động container"
+    echo "  - Kết nối mạng Docker đảm bảo Caddy có thể truy cập News API"
+    echo "  - Dễ dàng quản lý cùng với N8N và Caddy"
+fi
 echo ""
 
 echo "⏱️  LƯU Ý KHỞI ĐỘNG:"
 echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
 echo "  - SSL certificate tự động có thể mất 5-10 phút để cấu hình"
 echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
+if [ "$SETUP_NEWS_API" = "y" ]; then
+    echo "  - News API có thể cần 3-5 phút để cài đặt dependencies và khởi động"
+fi
 echo ""
 
 echo "👨‍💻 THÔNG TIN TÁC GIẢ:"
 echo "  - Script gốc: Nguyễn Ngọc Thiện"
 echo "  - YouTube: @EtoolsAICONTENT"
 echo "  - Phiên bản cải tiến: Tích hợp News API + Telegram Backup"
+echo "  - Cải tiến mới: Chạy News API trong Docker Container"
 echo ""
 echo "======================================================================"
 echo "🎯 CÀI ĐẶT HOÀN TẤT! CHÚC BẠN SỬ DỤNG N8N HIỆU QUẢ!"
