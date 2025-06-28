@@ -2,7 +2,7 @@
 
 # Hiển thị banner
 echo "======================================================================"
-echo "   Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer, thêm tính năng api cào bài viết và SSL tự động"
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer, thêm tính năng api cào bài viết và SSL tự động"
 echo "======================================================================"
 
 # Kiểm tra xem script có được chạy với quyền root không
@@ -108,24 +108,12 @@ done
 # Hàm kiểm tra domain
 check_domain() {
     local domain=$1
-    local server_ip=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "")
-    local domain_ip=$(dig +short $domain 2>/dev/null || nslookup $domain 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}' || echo "")
-
-    echo "🔍 Kiểm tra DNS pointing:"
-    echo "  - Server IP: $server_ip"
-    echo "  - Domain IP: $domain_ip"
-    
-    # Kiểm tra nếu không lấy được IP
-    if [ -z "$server_ip" ] || [ -z "$domain_ip" ]; then
-        echo "⚠️  Không thể xác định IP. Tiếp tục cài đặt..."
-        return 0
-    fi
+    local server_ip=$(curl -s https://api.ipify.org)
+    local domain_ip=$(dig +short $domain)
 
     if [ "$domain_ip" = "$server_ip" ]; then
-        echo "✅ Domain đã trỏ đúng"
         return 0  # Domain đã trỏ đúng
     else
-        echo "❌ Domain chưa trỏ đúng"
         return 1  # Domain chưa trỏ đúng
     fi
 }
@@ -141,53 +129,6 @@ check_commands() {
 
 # Thiết lập swap
 setup_swap
-
-# Hàm kiểm tra và khởi động Docker daemon
-start_docker_daemon() {
-    echo "🔧 Kiểm tra và khởi động Docker daemon..."
-    
-    # Kiểm tra xem có phải WSL không
-    if grep -qi microsoft /proc/version 2>/dev/null || grep -qi wsl /proc/version 2>/dev/null; then
-        echo "⚠️  Phát hiện môi trường WSL - sẽ khởi động Docker daemon thủ công"
-        
-        # Khởi động Docker daemon cho WSL
-        if ! pgrep dockerd > /dev/null; then
-            echo "Khởi động Docker daemon..."
-            dockerd > /dev/null 2>&1 &
-            sleep 10
-            
-            # Đợi daemon sẵn sàng
-            for i in {1..30}; do
-                if docker info > /dev/null 2>&1; then
-                    echo "✅ Docker daemon đã khởi động thành công"
-                    break
-                fi
-                sleep 2
-                echo "Đợi Docker daemon khởi động... ($i/30)"
-            done
-            
-            if ! docker info > /dev/null 2>&1; then
-                echo "❌ Không thể khởi động Docker daemon trong WSL"
-                echo "💡 Thử khởi động Docker Desktop trên Windows hoặc chạy lệnh sau:"
-                echo "   sudo dockerd &"
-                return 1
-            fi
-        else
-            echo "✅ Docker daemon đã đang chạy"
-        fi
-    else
-        # Môi trường VPS/Server thông thường
-        if systemctl is-active --quiet docker; then
-            echo "✅ Docker service đã đang chạy"
-        else
-            echo "Khởi động Docker service..."
-            systemctl start docker
-            systemctl enable docker
-        fi
-    fi
-    
-    return 0
-}
 
 # Hàm cài đặt Docker
 install_docker() {
@@ -239,10 +180,45 @@ install_docker() {
         echo "Đã thêm user $SUDO_USER vào nhóm docker. Các thay đổi sẽ có hiệu lực sau khi đăng nhập lại."
     fi
 
-    # Khởi động Docker daemon
-    if ! start_docker_daemon; then
-        echo "❌ Lỗi khởi động Docker daemon"
-        exit 1
+    # Khởi động Docker daemon (quan trọng cho môi trường ảo)
+    echo "Đang khởi động Docker daemon..."
+    
+    # Cố gắng khởi động docker service
+    if systemctl is-active docker &>/dev/null; then
+        echo "Docker daemon đã chạy."
+    else
+        echo "Khởi động Docker daemon..."
+        systemctl enable docker &>/dev/null || true
+        systemctl start docker &>/dev/null || true
+        
+        # Chờ Docker daemon khởi động
+        echo "Đợi Docker daemon khởi động (10 giây)..."
+        sleep 10
+        
+        # Nếu vẫn không chạy, thử khởi động thủ công (cho môi trường ảo)
+        if ! systemctl is-active docker &>/dev/null; then
+            echo "⚠️ Docker service không khởi động được, thử khởi động thủ công..."
+            
+            # Tạo và khởi động docker daemon cho môi trường ảo
+            if command -v dockerd &>/dev/null; then
+                echo "Khởi động Docker daemon trong nền..."
+                nohup dockerd > /var/log/docker.log 2>&1 &
+                sleep 15
+                
+                # Kiểm tra lại
+                if docker version &>/dev/null; then
+                    echo "✅ Docker daemon đã khởi động thành công!"
+                else
+                    echo "❌ Không thể khởi động Docker daemon"
+                    echo "📋 Vui lòng khởi động lại máy và chạy lại script"
+                    echo "📋 Hoặc khởi động thủ công: sudo systemctl start docker"
+                    exit 1
+                fi
+            else
+                echo "❌ Không tìm thấy dockerd. Vui lòng khởi động lại và thử lại"
+                exit 1
+            fi
+        fi
     fi
 
     echo "Docker và Docker Compose đã được cài đặt thành công."
@@ -318,37 +294,16 @@ fi
 # Kiểm tra domain
 echo "Kiểm tra domain $DOMAIN..."
 if check_domain $DOMAIN; then
-    echo "✅ Tiếp tục cài đặt với domain $DOMAIN"
+    echo "Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
 else
-    echo ""
-    echo "⚠️  CẢNH BÁO: Domain chưa được trỏ đúng"
-    echo "📝 Hướng dẫn cấu hình DNS:"
-    echo "  1. Truy cập panel quản lý domain của bạn"
-    echo "  2. Tạo/sửa bản ghi A record:"
-    echo "     - Name: @ (hoặc để trống)"
-    echo "     - Type: A"
-    echo "     - Value: $(curl -s https://api.ipify.org 2>/dev/null || echo "SERVER_IP")"
-    echo "  3. Tạo bản ghi A record cho subdomain API:"
-    echo "     - Name: api"
-    echo "     - Type: A"
-    echo "     - Value: $(curl -s https://api.ipify.org 2>/dev/null || echo "SERVER_IP")"
-    echo ""
-    read -p "Bạn có muốn tiếp tục cài đặt không? (y/n): " CONTINUE_INSTALL
-    if [ "$CONTINUE_INSTALL" != "y" ] && [ "$CONTINUE_INSTALL" != "Y" ]; then
-        echo "Thoát cài đặt. Vui lòng cấu hình DNS và chạy lại script."
-        exit 1
-    fi
-    echo "⚠️  Tiếp tục cài đặt - SSL có thể thất bại nếu DNS chưa đúng"
+    echo "Domain $DOMAIN chưa được trỏ đến server này."
+    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
+    echo "Sau khi cập nhật DNS, hãy chạy lại script này"
+    exit 1
 fi
 
 # Cài đặt Docker và Docker Compose
 install_docker
-
-# Đảm bảo Docker daemon đang chạy
-if ! start_docker_daemon; then
-    echo "❌ Không thể khởi động Docker daemon. Thoát script."
-    exit 1
-fi
 
 # Function cleanup containers và images cũ
 cleanup_old_installation() {
@@ -485,7 +440,7 @@ EOF
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    # Tạo docker-compose với News API
+    # Docker compose với FastAPI service
     cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, Puppeteer và News API
 services:
@@ -533,6 +488,7 @@ services:
       - NEWS_API_TOKEN=${NEWS_API_TOKEN}
       - NEWS_API_HOST=0.0.0.0
       - NEWS_API_PORT=8000
+      - CURRENT_DOMAIN=${DOMAIN}
     volumes:
       - ${N8N_DIR}/news_api:/app
     depends_on:
@@ -557,7 +513,7 @@ volumes:
   caddy_config:
 EOF
 else
-    # Tạo docker-compose chỉ có N8N
+    # Docker compose chỉ với N8N
     cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
@@ -615,115 +571,21 @@ fi
 # Tạo file Caddyfile
 echo "Tạo file Caddyfile..."
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    # Caddyfile với cả domain chính và API subdomain
+    # Caddyfile với API subdomain
     cat << EOF > $N8N_DIR/Caddyfile
-# Main N8N domain
 ${DOMAIN} {
     reverse_proxy n8n:5678
-    
-    # SSL configuration
-    tls {
-        protocols tls1.2 tls1.3
-    }
-    
-    # Headers for security
-    header {
-        # Enable HSTS
-        Strict-Transport-Security max-age=31536000;
-        # Prevent MIME type sniffing
-        X-Content-Type-Options nosniff
-        # Prevent clickjacking
-        X-Frame-Options DENY
-        # XSS protection
-        X-XSS-Protection "1; mode=block"
-        # Remove server header
-        -Server
-    }
-    
-    # Error handling
-    handle_errors {
-        @ssl_error expression {http.error.status_code} == 526
-        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
-    }
 }
 
-# News API subdomain
 api.${DOMAIN} {
     reverse_proxy fastapi:8000
-    
-    # SSL configuration
-    tls {
-        protocols tls1.2 tls1.3
-    }
-    
-    # Headers for API
-    header {
-        # CORS headers
-        Access-Control-Allow-Origin *
-        Access-Control-Allow-Methods "GET, POST, OPTIONS"
-        Access-Control-Allow-Headers "Authorization, Content-Type"
-        # Security headers
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        -Server
-    }
-    
-    # Handle preflight requests
-    @options method OPTIONS
-    respond @options 200
-    
-    # Error handling
-    handle_errors {
-        @ssl_error expression {http.error.status_code} == 526
-        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
-    }
-}
-
-# HTTP to HTTPS redirect (fallback)
-http://${DOMAIN} {
-    redir https://${DOMAIN}{uri} permanent
-}
-
-http://api.${DOMAIN} {
-    redir https://api.${DOMAIN}{uri} permanent
 }
 EOF
 else
-    # Caddyfile chỉ có domain chính
+    # Caddyfile chỉ với domain chính
     cat << EOF > $N8N_DIR/Caddyfile
-# Main N8N domain
 ${DOMAIN} {
     reverse_proxy n8n:5678
-    
-    # SSL configuration
-    tls {
-        protocols tls1.2 tls1.3
-    }
-    
-    # Headers for security
-    header {
-        # Enable HSTS
-        Strict-Transport-Security max-age=31536000;
-        # Prevent MIME type sniffing
-        X-Content-Type-Options nosniff
-        # Prevent clickjacking
-        X-Frame-Options DENY
-        # XSS protection
-        X-XSS-Protection "1; mode=block"
-        # Remove server header
-        -Server
-    }
-    
-    # Error handling
-    handle_errors {
-        @ssl_error expression {http.error.status_code} == 526
-        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
-    }
-}
-
-# HTTP to HTTPS redirect
-http://${DOMAIN} {
-    redir https://${DOMAIN}{uri} permanent
 }
 EOF
 fi
@@ -863,57 +725,28 @@ EOF
 # Đặt quyền thực thi cho script sao lưu
 chmod +x $N8N_DIR/backup-workflows.sh
 
-# Tạo script backup thủ công để test
-echo "Tạo script backup thủ công để test..."
-cat << EOF > $N8N_DIR/backup-manual.sh
+# Tạo script backup thủ công
+echo "Tạo script backup thủ công..."
+cat << 'EOF' > $N8N_DIR/manual-backup.sh
 #!/bin/bash
 
-echo "🔄 BACKUP N8N THỦ CÔNG"
-echo "======================"
+echo "🔄 Bắt đầu backup thủ công N8N..."
 
-# Gọi script backup chính
-if [ -f "$N8N_DIR/backup-workflows.sh" ]; then
-    echo "Đang chạy backup..."
-    $N8N_DIR/backup-workflows.sh
-    
+# Chạy script backup chính
+SCRIPT_DIR="$(dirname "$0")"
+"$SCRIPT_DIR/backup-workflows.sh"
+
+if [ $? -eq 0 ]; then
     echo ""
-    echo "📁 Kiểm tra kết quả backup:"
-    echo "Thư mục backup: $N8N_DIR/files/backup_full/"
-    
-    if [ -d "$N8N_DIR/files/backup_full" ]; then
-        echo "Các file backup hiện có:"
-        ls -la $N8N_DIR/files/backup_full/
-        
-        # Hiển thị file backup mới nhất
-        LATEST_BACKUP=\$(ls -t $N8N_DIR/files/backup_full/n8n_backup_*.tar 2>/dev/null | head -1)
-        if [ -n "\$LATEST_BACKUP" ]; then
-            echo ""
-            echo "📦 File backup mới nhất: \$LATEST_BACKUP"
-            echo "📊 Kích thước: \$(du -h "\$LATEST_BACKUP" | cut -f1)"
-            echo "📅 Thời gian: \$(stat -c %y "\$LATEST_BACKUP")"
-            
-            # Kiểm tra nội dung backup
-            echo ""
-            echo "🔍 Nội dung backup:"
-            tar -tzf "\$LATEST_BACKUP" | head -20
-            if [ \$(tar -tzf "\$LATEST_BACKUP" | wc -l) -gt 20 ]; then
-                echo "... và \$((\$(tar -tzf "\$LATEST_BACKUP" | wc -l) - 20)) file khác"
-            fi
-        else
-            echo "❌ Không tìm thấy file backup nào"
-        fi
-    else
-        echo "❌ Thư mục backup không tồn tại"
-    fi
+    echo "✅ Backup thủ công hoàn tất!"
+    echo "📁 Kiểm tra thư mục: $SCRIPT_DIR/files/backup_full/"
+    echo "📋 Xem log: $SCRIPT_DIR/files/backup_full/backup.log"
 else
-    echo "❌ Script backup không tìm thấy: $N8N_DIR/backup-workflows.sh"
+    echo "❌ Backup thất bại! Vui lòng kiểm tra lỗi và thử lại."
 fi
-
-echo ""
-echo "✅ Hoàn tất kiểm tra backup thủ công"
 EOF
 
-chmod +x $N8N_DIR/backup-manual.sh
+chmod +x $N8N_DIR/manual-backup.sh
 
 # Lưu cấu hình Telegram nếu có
 if [ "$SETUP_TELEGRAM" = "y" ] && [ -f "/tmp/telegram_config.txt" ]; then
@@ -929,56 +762,51 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     # Tạo thư mục cho News API
     mkdir -p $N8N_DIR/news_api
     
-    # Tạo môi trường ảo Python
-    echo "Tạo môi trường ảo Python cho News API..."
-    python3 -m venv $N8N_DIR/news_api/venv
-    
-    # Cài đặt các thư viện cần thiết
-    echo "Cài đặt các thư viện Python cần thiết..."
-    $N8N_DIR/news_api/venv/bin/pip install --upgrade pip
-    $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser
-    
-    # Tạo Dockerfile cho News API
+    # Tạo Dockerfile cho FastAPI
+    echo "Tạo Dockerfile cho News API..."
     cat << 'EOF' > $N8N_DIR/news_api/Dockerfile
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Cài đặt các gói cần thiết
+# Cài đặt các gói system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements và cài đặt
+# Copy requirements và cài đặt Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy code
+# Copy application code
 COPY . .
 
+# Expose port
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Chạy ứng dụng
+CMD ["python", "main.py"]
 EOF
 
-    # Tạo requirements.txt
+    # Tạo file requirements.txt
+    echo "Tạo file requirements.txt..."
     cat << 'EOF' > $N8N_DIR/news_api/requirements.txt
 fastapi==0.104.1
-uvicorn==0.24.0
-newspaper4k>=0.9.0
-fake-useragent>=1.4.0
-python-multipart>=0.0.6
-pydantic>=2.5.0
-requests>=2.32.0
-beautifulsoup4>=4.12.0
-feedparser>=6.0.0
-aiofiles>=23.2.0
-httpx>=0.25.0
+uvicorn[standard]==0.24.0
+newspaper4k==0.9.2
+fake-useragent==1.4.0
+python-multipart==0.0.6
+pydantic==2.5.0
+requests==2.31.0
+beautifulsoup4==4.12.2
+feedparser==6.0.10
+lxml==4.9.3
+nltk==3.8.1
 EOF
-
+    
     # Tạo file main.py cho FastAPI
-    cat << EOF > $N8N_DIR/news_api/main.py
+    cat << 'EOF' > $N8N_DIR/news_api/main.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
@@ -1001,10 +829,10 @@ import newspaper
 from newspaper import Article, Source
 
 # Cấu hình
-API_TOKEN = os.getenv("NEWS_API_TOKEN", "$NEWS_API_TOKEN")
+API_TOKEN = os.getenv("NEWS_API_TOKEN", "your-secret-token-here")
 API_HOST = os.getenv("NEWS_API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("NEWS_API_PORT", "8000"))
-DOMAIN = "${DOMAIN}"
+CURRENT_DOMAIN = os.getenv("CURRENT_DOMAIN", "yourdomain.com")
 
 # FastAPI app
 app = FastAPI(
@@ -1179,7 +1007,7 @@ async def home():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>📰 News Content API - {DOMAIN}</title>
+        <title>📰 News Content API - 2025</title>
         <style>
             * {{
                 margin: 0;
@@ -1189,375 +1017,406 @@ async def home():
             
             body {{
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                line-height: 1.6;
-                color: #333;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 min-height: 100vh;
+                color: #333;
+                line-height: 1.6;
             }}
             
-            .author-info {{
+            .author-nav {{
                 position: fixed;
                 top: 20px;
                 right: 20px;
                 background: rgba(255, 255, 255, 0.95);
-                backdrop-filter: blur(10px);
-                padding: 15px;
-                border-radius: 15px;
+                padding: 10px 15px;
+                border-radius: 50px;
                 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
                 z-index: 1000;
                 transition: all 0.3s ease;
-                max-width: 280px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
             }}
             
-            .author-info.scrolled {{
-                top: 10px;
-                transform: scale(0.9);
+            .author-nav:hover {{
+                transform: scale(1.05);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
             }}
             
-            .author-info h4 {{
-                color: #667eea;
-                margin-bottom: 10px;
-                font-size: 14px;
+            .author-info {{
+                font-size: 12px;
+                color: #666;
                 text-align: center;
             }}
             
-            .author-info a {{
-                color: #667eea;
-                text-decoration: none;
-                font-size: 12px;
-                display: block;
-                margin: 5px 0;
-                transition: color 0.3s ease;
+            .author-info .name {{
+                font-weight: bold;
+                color: #4f46e5;
+                margin-bottom: 2px;
             }}
             
-            .author-info a:hover {{
-                color: #764ba2;
+            .author-links {{
+                display: flex;
+                gap: 8px;
+                margin-top: 5px;
+                justify-content: center;
+            }}
+            
+            .author-links a {{
+                color: #e11d48;
+                text-decoration: none;
+                font-size: 11px;
+                padding: 2px 6px;
+                border-radius: 10px;
+                background: rgba(225, 29, 72, 0.1);
+                transition: all 0.2s ease;
+            }}
+            
+            .author-links a:hover {{
+                background: #e11d48;
+                color: white;
             }}
             
             .container {{
                 max-width: 1200px;
                 margin: 0 auto;
-                padding: 20px;
-                min-height: 100vh;
-                display: flex;
-                flex-direction: column;
+                padding: 40px 20px;
+                position: relative;
             }}
             
             .header {{
                 text-align: center;
+                margin-bottom: 50px;
                 color: white;
-                margin-bottom: 40px;
-                padding: 40px 0;
             }}
             
             .header h1 {{
-                font-size: 3rem;
-                margin-bottom: 10px;
-                text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            }}
-            
-            .header p {{
-                font-size: 1.2rem;
-                opacity: 0.9;
-            }}
-            
-            .main-content {{
-                background: rgba(255, 255, 255, 0.95);
-                backdrop-filter: blur(10px);
-                border-radius: 20px;
-                padding: 40px;
-                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
-                margin-bottom: 20px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-            }}
-            
-            .api-info {{
-                background: linear-gradient(135deg, #667eea, #764ba2);
-                color: white;
-                padding: 25px;
-                border-radius: 15px;
-                margin: 25px 0;
-                box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
-            }}
-            
-            .api-info h3 {{
+                font-size: 3.5rem;
                 margin-bottom: 15px;
+                background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                animation: glow 2s ease-in-out infinite alternate;
+            }}
+            
+            @keyframes glow {{
+                from {{ text-shadow: 0 0 20px rgba(255, 107, 107, 0.5); }}
+                to {{ text-shadow: 0 0 30px rgba(78, 205, 196, 0.8); }}
+            }}
+            
+            .subtitle {{
                 font-size: 1.3rem;
+                opacity: 0.9;
+                margin-bottom: 30px;
             }}
             
-            .api-info code {{
-                background: rgba(255, 255, 255, 0.2);
-                padding: 8px 12px;
-                border-radius: 8px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                display: inline-block;
-                margin-top: 10px;
-            }}
-            
-            .endpoints-grid {{
+            .cards-grid {{
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                gap: 20px;
-                margin: 30px 0;
+                grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                gap: 30px;
+                margin-bottom: 40px;
+            }}
+            
+            .card {{
+                background: rgba(255, 255, 255, 0.95);
+                padding: 30px;
+                border-radius: 20px;
+                box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                transition: all 0.3s ease;
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .card::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 4px;
+                background: linear-gradient(90deg, #667eea, #764ba2);
+            }}
+            
+            .card:hover {{
+                transform: translateY(-10px);
+                box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+            }}
+            
+            .card h3 {{
+                color: #4f46e5;
+                margin-bottom: 15px;
+                font-size: 1.4rem;
+                display: flex;
+                align-items: center;
+                gap: 10px;
             }}
             
             .endpoint {{
-                background: white;
-                padding: 25px;
-                border-radius: 15px;
-                box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-                border-left: 5px solid #667eea;
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
+                background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                padding: 20px;
+                margin: 15px 0;
+                border-radius: 12px;
+                border-left: 4px solid #4f46e5;
+                transition: all 0.2s ease;
             }}
             
             .endpoint:hover {{
-                transform: translateY(-5px);
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+                transform: translateX(5px);
+                box-shadow: 0 8px 25px rgba(79, 70, 229, 0.1);
             }}
             
             .endpoint h4 {{
-                color: #667eea;
-                margin-bottom: 10px;
+                color: #1e293b;
+                margin-bottom: 8px;
                 font-size: 1.1rem;
             }}
             
-            .endpoint p {{
-                color: #666;
-                line-height: 1.5;
+            .method {{
+                display: inline-block;
+                padding: 3px 8px;
+                border-radius: 6px;
+                font-size: 0.8rem;
+                font-weight: bold;
+                margin-right: 10px;
             }}
             
-            .curl-examples {{
-                background: #f8f9fa;
-                padding: 25px;
-                border-radius: 15px;
+            .method.get {{ background: #10b981; color: white; }}
+            .method.post {{ background: #3b82f6; color: white; }}
+            
+            .example-section {{
+                background: rgba(255, 255, 255, 0.95);
+                padding: 30px;
+                border-radius: 20px;
                 margin: 30px 0;
-                border: 1px solid #e9ecef;
+                box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
             }}
             
-            .curl-examples h3 {{
-                color: #667eea;
+            .example-section h3 {{
+                color: #4f46e5;
                 margin-bottom: 20px;
+                font-size: 1.5rem;
             }}
             
-            .curl-command {{
-                background: #2d3748;
-                color: #68d391;
-                padding: 15px;
-                border-radius: 10px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 14px;
-                overflow-x: auto;
+            .curl-example {{
+                background: #1e293b;
+                color: #e2e8f0;
+                padding: 20px;
+                border-radius: 12px;
                 margin: 15px 0;
-                border: 1px solid #4a5568;
+                font-family: 'Courier New', monospace;
+                font-size: 0.9rem;
+                overflow-x: auto;
+                position: relative;
+            }}
+            
+            .copy-btn {{
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                background: #4f46e5;
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.8rem;
+                transition: background 0.2s ease;
+            }}
+            
+            .copy-btn:hover {{
+                background: #4338ca;
+            }}
+            
+            .btn-primary {{
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 15px 30px;
+                border-radius: 50px;
+                text-decoration: none;
+                font-weight: bold;
+                margin: 20px auto;
+                text-align: center;
+                transition: all 0.3s ease;
+                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            }}
+            
+            .btn-primary:hover {{
+                transform: translateY(-3px);
+                box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4);
             }}
             
             .change-token {{
-                background: #fff3cd;
-                border: 1px solid #ffeaa7;
-                border-radius: 10px;
+                background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+                color: white;
                 padding: 20px;
+                border-radius: 12px;
                 margin: 20px 0;
+                border-left: 4px solid #f59e0b;
             }}
             
             .change-token h4 {{
-                color: #856404;
                 margin-bottom: 10px;
-            }}
-            
-            .change-token code {{
-                background: #fff;
-                padding: 8px 12px;
-                border-radius: 5px;
-                border: 1px solid #dee2e6;
-                display: block;
-                margin: 10px 0;
-            }}
-            
-            .cta-section {{
-                text-align: center;
-                margin-top: 40px;
-                padding: 30px;
-                background: linear-gradient(135deg, #667eea, #764ba2);
-                border-radius: 15px;
                 color: white;
             }}
             
-            .cta-section a {{
-                display: inline-block;
-                background: white;
-                color: #667eea;
-                padding: 15px 30px;
-                border-radius: 25px;
-                text-decoration: none;
-                font-weight: bold;
-                margin: 10px;
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
-            }}
-            
-            .cta-section a:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            }}
-            
+            /* Mobile Responsive */
             @media (max-width: 768px) {{
-                .author-info {{
+                .author-nav {{
                     position: relative;
                     top: 0;
                     right: 0;
-                    margin-bottom: 20px;
-                    max-width: 100%;
+                    margin: 0 0 20px 0;
+                    border-radius: 15px;
                 }}
                 
                 .header h1 {{
-                    font-size: 2rem;
+                    font-size: 2.5rem;
                 }}
                 
-                .main-content {{
-                    padding: 20px;
-                }}
-                
-                .endpoints-grid {{
+                .cards-grid {{
                     grid-template-columns: 1fr;
+                    gap: 20px;
                 }}
+                
+                .container {{
+                    padding: 20px 15px;
+                }}
+                
+                .curl-example {{
+                    font-size: 0.8rem;
+                    padding: 15px;
+                }}
+            }}
+            
+            /* Sticky scroll behavior */
+            .author-nav.scrolled {{
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                transform: scale(0.9);
+                background: rgba(255, 255, 255, 0.98);
             }}
         </style>
     </head>
     <body>
-        <div class="author-info" id="authorInfo">
-            <h4>👨‍💻 Thông Tin Tác Giả</h4>
-            <a href="https://www.youtube.com/@kalvinthiensocial" target="_blank">📺 YouTube: Kalvin Thien Social</a>
-            <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank">📘 Facebook: Ban Thien Handsome</a>
-            <a href="tel:0888884749">📱 Zalo/Phone: 08.8888.4749</a>
-            <p style="font-size: 11px; color: #666; margin-top: 10px;">🚀 Ngày cập nhật: 27/06/2025</p>
+        <div class="author-nav" id="authorNav">
+            <div class="author-info">
+                <div class="name">Nguyễn Ngọc Thiện</div>
+                <div class="author-links">
+                    <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank">📺 YouTube</a>
+                    <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank">📘 Facebook</a>
+                    <a href="tel:0888884749">📱 Zalo</a>
+                </div>
+            </div>
         </div>
-
+        
         <div class="container">
             <div class="header">
                 <h1>📰 News Content API</h1>
-                <p>API lấy nội dung tin tức sử dụng Newspaper4k cho domain: <strong>{DOMAIN}</strong></p>
+                <p class="subtitle">Powered by FastAPI + Newspaper4k | Design 2025</p>
+                <p>API chuyên nghiệp để lấy nội dung tin tức từ mọi website</p>
             </div>
             
-            <div class="main-content">
-                <div class="api-info">
-                    <h3>🔐 Xác Thực API</h3>
-                    <p>Tất cả API endpoints yêu cầu Bearer Token trong header:</p>
-                    <code>Authorization: Bearer YOUR_TOKEN_HERE</code>
-                    <p style="margin-top: 15px; font-size: 14px; opacity: 0.9;">
-                        ⚠️ Token được cấu hình riêng cho mỗi installation để bảo mật
-                    </p>
+            <div class="cards-grid">
+                <div class="card">
+                    <h3>🔐 Xác thực API</h3>
+                    <p>Tất cả endpoints yêu cầu Bearer Token trong header:</p>
+                    <div class="curl-example">Authorization: Bearer YOUR_TOKEN_HERE</div>
+                    <p><strong>⚠️ Quan trọng:</strong> Thay YOUR_TOKEN_HERE bằng token thật</p>
                 </div>
-
-                <div class="endpoints-grid">
+                
+                <div class="card">
+                    <h3>📊 API Endpoints</h3>
+                    
                     <div class="endpoint">
-                        <h4>GET /health</h4>
-                        <p>Kiểm tra trạng thái API và thông tin phiên bản</p>
+                        <h4><span class="method get">GET</span>/health</h4>
+                        <p>Kiểm tra trạng thái API và thông tin hệ thống</p>
                     </div>
                     
                     <div class="endpoint">
-                        <h4>POST /extract-article</h4>
+                        <h4><span class="method post">POST</span>/extract-article</h4>
                         <p>Lấy nội dung chi tiết của một bài viết từ URL</p>
                     </div>
                     
                     <div class="endpoint">
-                        <h4>POST /extract-source</h4>
-                        <p>Lấy nhiều bài viết từ một trang tin tức</p>
+                        <h4><span class="method post">POST</span>/extract-source</h4>
+                        <p>Lấy nhiều bài viết từ trang tin tức</p>
                     </div>
                     
                     <div class="endpoint">
-                        <h4>POST /parse-feed</h4>
-                        <p>Phân tích RSS feed và lấy danh sách bài viết</p>
+                        <h4><span class="method post">POST</span>/parse-feed</h4>
+                        <p>Phân tích và lấy nội dung từ RSS Feed</p>
                     </div>
-                    
-                    <div class="endpoint">
-                        <h4>GET /stats</h4>
-                        <p>Thống kê sử dụng API (cần authentication)</p>
-                    </div>
-                </div>
-
-                <div class="curl-examples">
-                    <h3>💻 Ví Dụ Lệnh cURL</h3>
-                    
-                    <h4>1. Kiểm tra trạng thái API:</h4>
-                    <div class="curl-command">
-curl -X GET "https://api.{DOMAIN}/health" \\
-     -H "Authorization: Bearer YOUR_TOKEN_HERE"
-                    </div>
-
-                    <h4>2. Lấy nội dung bài viết:</h4>
-                    <div class="curl-command">
-curl -X POST "https://api.{DOMAIN}/extract-article" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
-     -d '{{
-       "url": "https://example.com/news-article",
-       "language": "vi",
-       "extract_images": true,
-       "summarize": true
-     }}'
-                    </div>
-
-                    <h4>3. Phân tích RSS feed:</h4>
-                    <div class="curl-command">
-curl -X POST "https://api.{DOMAIN}/parse-feed" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
-     -d '{{
-       "url": "https://example.com/rss.xml",
-       "max_articles": 10
-     }}'
-                    </div>
-                </div>
-
-                <div class="change-token" id="change-token">
-                    <h4>🔧 Hướng Dẫn Đổi Bearer Token</h4>
-                    <p>Để thay đổi Bearer Token cho API, sử dụng các lệnh sau:</p>
-                    
-                    <p><strong>1. Đổi token và restart service:</strong></p>
-                    <code>sudo sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN="TOKEN_MOI"/' /etc/systemd/system/news-api.service && sudo systemctl daemon-reload && sudo systemctl restart news-api</code>
-                    
-                    <p><strong>2. Đổi token trong Docker environment:</strong></p>
-                    <code>cd {os.path.dirname(os.path.abspath(__file__))} && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=TOKEN_MOI/' docker-compose.yml && docker-compose restart fastapi</code>
-                    
-                    <p><strong>3. Kiểm tra token hiện tại:</strong></p>
-                    <code>curl -X GET "https://api.{DOMAIN}/health" -H "Authorization: Bearer TOKEN_CU" | jq</code>
-                </div>
-
-                <div class="cta-section">
-                    <h3>🚀 Bắt Đầu Sử Dụng</h3>
-                    <p>Truy cập tài liệu API chi tiết hoặc test ngay các endpoint</p>
-                    <a href="/docs">📚 Swagger UI Documentation</a>
-                    <a href="/redoc">📖 ReDoc Documentation</a>
                 </div>
             </div>
-        </div>
-
-        <script>
-            // Sticky author info với scroll effect
-            window.addEventListener('scroll', function() {{
-                const authorInfo = document.getElementById('authorInfo');
-                if (window.scrollY > 100) {{
-                    authorInfo.classList.add('scrolled');
-                }} else {{
-                    authorInfo.classList.remove('scrolled');
-                }}
-            }});
-
-            // Auto copy curl commands khi click
-            document.querySelectorAll('.curl-command').forEach(function(element) {{
-                element.addEventListener('click', function() {{
-                    navigator.clipboard.writeText(this.textContent.trim()).then(function() {{
-                        // Hiệu ứng copied
-                        element.style.background = '#22543d';
-                        setTimeout(function() {{
-                            element.style.background = '#2d3748';
-                        }}, 1000);
-                    }});
-                }});
+            
+            <div class="example-section">
+                <h3>🚀 Ví dụ sử dụng với cURL</h3>
                 
-                // Thêm tooltip
-                element.title = 'Click để copy lệnh';
-                element.style.cursor = 'pointer';
+                <h4>1. Lấy nội dung bài viết:</h4>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('curl1')">📋 Copy</button>
+                    <div id="curl1">curl -X POST "https://api.{CURRENT_DOMAIN}/extract-article" \\
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"url": "https://example.com/news-article", "language": "vi"}}'</div>
+                </div>
+                
+                <h4>2. Kiểm tra trạng thái API:</h4>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('curl2')">📋 Copy</button>
+                    <div id="curl2">curl -X GET "https://api.{CURRENT_DOMAIN}/health" \\
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"</div>
+                </div>
+                
+                <h4>3. Phân tích RSS Feed:</h4>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('curl3')">📋 Copy</button>
+                    <div id="curl3">curl -X POST "https://api.{CURRENT_DOMAIN}/parse-feed" \\
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"url": "https://example.com/rss", "max_articles": 10}}'</div>
+                </div>
+            </div>
+            
+            <div class="change-token" id="change-token">
+                <h4>🔑 Thay đổi Bearer Token</h4>
+                <p>Để thay đổi Bearer Token của API, chạy lệnh sau trên server:</p>
+                <div class="curl-example">
+                    <button class="copy-btn" onclick="copyToClipboard('changeToken')">📋 Copy</button>
+                    <div id="changeToken">sudo docker exec -it news-api-container /bin/bash -c "export NEWS_API_TOKEN='TOKEN_MOI_CUA_BAN' && python restart_api.py"</div>
+                </div>
+                <p><em>Hoặc sửa file docker-compose.yml và restart container</em></p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 40px;">
+                <a href="/docs" class="btn-primary">📚 Xem tài liệu API đầy đủ (Swagger UI)</a>
+            </div>
+        </div>
+        
+        <script>
+            function copyToClipboard(elementId) {{
+                const element = document.getElementById(elementId);
+                navigator.clipboard.writeText(element.textContent).then(function() {{
+                    const btn = element.parentElement.querySelector('.copy-btn');
+                    btn.textContent = '✅ Copied!';
+                    setTimeout(() => {{
+                        btn.textContent = '📋 Copy';
+                    }}, 2000);
+                }});
+            }}
+            
+            // Sticky author nav on scroll
+            window.addEventListener('scroll', function() {{
+                const authorNav = document.getElementById('authorNav');
+                if (window.scrollY > 100) {{
+                    authorNav.classList.add('scrolled');
+                }} else {{
+                    authorNav.classList.remove('scrolled');
+                }}
             }});
         </script>
     </body>
@@ -1645,8 +1504,7 @@ if __name__ == "__main__":
     import uvicorn
     print(f"🚀 Khởi động News Content API tại http://{API_HOST}:{API_PORT}")
     print(f"📚 Tài liệu API: http://{API_HOST}:{API_PORT}/docs")
-    print(f"🌐 Domain: {DOMAIN}")
-    print(f"🔒 Authentication: Bearer Token Required")
+    print(f"🔑 Bearer Token: {API_TOKEN}")
     
     uvicorn.run(
         "main:app",
@@ -1657,26 +1515,57 @@ if __name__ == "__main__":
     )
 EOF
 
-    # Tạo script khởi động News API
-    cat << EOF > $N8N_DIR/news_api/start_news_api.sh
+    # Tạo script restart API để đổi token
+    cat << 'EOF' > $N8N_DIR/news_api/change_token.sh
 #!/bin/bash
 
-# Cấu hình môi trường
-export NEWS_API_TOKEN="$NEWS_API_TOKEN"
-export NEWS_API_HOST="0.0.0.0"
-export NEWS_API_PORT="8001"
+if [ -z "$1" ]; then
+    echo "Usage: $0 <NEW_TOKEN>"
+    echo "Example: $0 my-new-secret-token-123"
+    exit 1
+fi
 
-# Khởi động News API
-cd "$N8N_DIR/news_api"
-source venv/bin/activate
-python main.py
+NEW_TOKEN="$1"
+N8N_DIR="$(dirname "$(dirname "$0")")"
+
+echo "🔄 Đang thay đổi Bearer Token cho News API..."
+
+# Cập nhật docker-compose.yml
+sed -i "s/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=$NEW_TOKEN/g" "$N8N_DIR/docker-compose.yml"
+
+# Restart container FastAPI
+echo "⏳ Restart FastAPI container..."
+cd "$N8N_DIR"
+
+# Xác định docker compose command
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE_CMD="docker compose"
+else
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+fi
+
+$DOCKER_COMPOSE_CMD restart fastapi
+
+echo "✅ Bearer Token đã được thay đổi thành: $NEW_TOKEN"
+echo "📋 API sẽ sẵn sàng trong vài giây..."
+EOF
+    
+    chmod +x $N8N_DIR/news_api/change_token.sh
+    
+    # Cập nhật Caddyfile để thêm subdomain api
+    cat << EOF > $N8N_DIR/Caddyfile
+${DOMAIN} {
+    reverse_proxy n8n:5678
+}
+
+api.${DOMAIN} {
+    reverse_proxy localhost:8001
+}
 EOF
 
-    # Đặt quyền cho các file
-    chmod +x $N8N_DIR/news_api/start_news_api.sh
-    chmod +x $N8N_DIR/news_api/main.py
-    
-    echo "✅ News API đã được tạo và sẽ được khởi động cùng với Docker Compose"
+    echo "✅ News API đã được tạo và khởi động thành công"
 fi
 
 # Đặt quyền cho thư mục n8n
@@ -1747,18 +1636,6 @@ fi
 # Đợi lâu hơn để các container có thể khởi động hoàn toàn
 echo "⏳ Đợi containers khởi động hoàn toàn (30 giây)..."
 sleep 30
-
-# Tạo file hosts entry cho testing local
-echo "📝 Tạo thông tin hosts entry cho testing..."
-SERVER_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "127.0.0.1")
-cat << EOF > $N8N_DIR/hosts_entry.txt
-# Thêm vào file /etc/hosts để test local (nếu DNS chưa propagate)
-$SERVER_IP $DOMAIN
-$SERVER_IP api.$DOMAIN
-
-# Trên Windows: C:\Windows\System32\drivers\etc\hosts
-# Trên Linux/Mac: /etc/hosts
-EOF
 
 # Kiểm tra các container đã chạy chưa
 echo "🔍 Kiểm tra trạng thái containers..."
@@ -2039,247 +1916,6 @@ EOF
 
 chmod +x $N8N_DIR/troubleshoot.sh
 
-# Tạo script debug SSL
-echo "Tạo script debug SSL..."
-cat << 'EOF' > $N8N_DIR/debug-ssl.sh
-#!/bin/bash
-
-# Script debug SSL issues
-echo "🔍 SSL DEBUG SCRIPT"
-echo "=================="
-
-N8N_DIR="$(dirname "$0")"
-cd "$N8N_DIR"
-
-# Xác định docker command
-if ! docker ps &>/dev/null; then
-    DOCKER_CMD="sudo docker"
-    DOCKER_COMPOSE_CMD="sudo docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="sudo docker compose"
-    fi
-else
-    DOCKER_CMD="docker"
-    DOCKER_COMPOSE_CMD="docker-compose"
-    if ! command -v docker-compose &> /dev/null; then
-        DOCKER_COMPOSE_CMD="docker compose"
-    fi
-fi
-
-# Lấy domain từ Caddyfile
-DOMAIN=$(grep -o '^[^{]*' Caddyfile | head -1 | sed 's/^# Main N8N domain//' | xargs)
-if [ -z "$DOMAIN" ]; then
-    DOMAIN=$(grep -E '^[a-zA-Z0-9.-]+\s*{' Caddyfile | head -1 | awk '{print $1}')
-fi
-
-echo "🌐 Domain được cấu hình: $DOMAIN"
-echo ""
-
-echo "1. Kiểm tra DNS Resolution..."
-echo "============================="
-echo ">> Domain chính:"
-dig +short $DOMAIN || nslookup $DOMAIN
-echo ""
-echo ">> API subdomain:"
-dig +short api.$DOMAIN || nslookup api.$DOMAIN
-echo ""
-
-echo "2. Kiểm tra Container Status..."
-echo "=============================="
-$DOCKER_CMD ps --filter "name=caddy" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-echo ""
-
-echo "3. Kiểm tra Caddy Logs..."
-echo "========================"
-echo ">> Caddy logs (20 dòng cuối):"
-$DOCKER_COMPOSE_CMD logs --tail=20 caddy
-echo ""
-
-echo "4. Test HTTP/HTTPS Connectivity..."
-echo "================================="
-echo ">> Test HTTP (should redirect):"
-curl -I -k http://$DOMAIN 2>/dev/null || echo "HTTP connection failed"
-echo ""
-echo ">> Test HTTPS:"
-curl -I -k https://$DOMAIN 2>/dev/null || echo "HTTPS connection failed"
-echo ""
-
-if [ -n "$(docker ps -q --filter 'name=fastapi')" ]; then
-    echo ">> Test API HTTP:"
-    curl -I -k http://api.$DOMAIN 2>/dev/null || echo "API HTTP connection failed"
-    echo ""
-    echo ">> Test API HTTPS:"
-    curl -I -k https://api.$DOMAIN 2>/dev/null || echo "API HTTPS connection failed"
-    echo ""
-fi
-
-echo "5. Kiểm tra SSL Certificate..."
-echo "============================="
-echo ">> SSL Certificate info cho $DOMAIN:"
-echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null || echo "Không thể lấy thông tin SSL certificate"
-echo ""
-
-echo "6. Kiểm tra Firewall và Ports..."
-echo "================================"
-echo ">> Listening ports:"
-netstat -tuln | grep -E ':(80|443|5678|8000)\s'
-echo ""
-
-echo "7. Caddyfile Configuration..."
-echo "============================"
-echo ">> Current Caddyfile:"
-cat Caddyfile
-echo ""
-
-echo "8. Khuyến nghị khắc phục..."
-echo "=========================="
-echo "Nếu gặp lỗi SSL:"
-echo "1. Kiểm tra DNS đã trỏ đúng chưa (có thể mất 5-60 phút)"
-echo "2. Restart Caddy: $DOCKER_COMPOSE_CMD restart caddy"
-echo "3. Xem logs chi tiết: $DOCKER_COMPOSE_CMD logs -f caddy"
-echo "4. Kiểm tra firewall: ufw status"
-echo "5. Test local: curl -H 'Host: $DOMAIN' http://localhost"
-echo ""
-
-echo "🔧 Lệnh khắc phục nhanh:"
-echo "========================"
-echo "# Restart tất cả containers:"
-echo "$DOCKER_COMPOSE_CMD restart"
-echo ""
-echo "# Force rebuild SSL:"
-echo "$DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d"
-echo ""
-echo "# Xóa SSL cache (nếu cần):"
-echo "$DOCKER_CMD volume ls | grep caddy && $DOCKER_CMD volume rm \$(docker volume ls -q | grep caddy)"
-echo ""
-
-read -p "Bạn có muốn restart Caddy ngay bây giờ? (y/n): " RESTART_CHOICE
-if [ "$RESTART_CHOICE" = "y" ] || [ "$RESTART_CHOICE" = "Y" ]; then
-    echo "🔄 Đang restart Caddy..."
-    $DOCKER_COMPOSE_CMD restart caddy
-    echo "✅ Hoàn tất restart. Đợi 30 giây để SSL certificate được tạo..."
-    sleep 30
-    echo "Test lại HTTPS:"
-    curl -I -k https://$DOMAIN || echo "Vẫn gặp lỗi SSL"
-fi
-EOF
-
-chmod +x $N8N_DIR/debug-ssl.sh
-
-# Tạo script test SSL nhanh
-echo "Tạo script test SSL nhanh..."
-cat << 'EOF' > $N8N_DIR/test-ssl-quick.sh
-#!/bin/bash
-
-# Script test SSL nhanh cho N8N
-echo "🔍 QUICK SSL TEST"
-echo "================="
-
-# Màu sắc
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Lấy domain từ tham số hoặc hỏi người dùng
-if [ -z "$1" ]; then
-    read -p "Nhập domain của bạn: " DOMAIN
-else
-    DOMAIN=$1
-fi
-
-echo "🌐 Testing domain: $DOMAIN"
-echo ""
-
-# Test 1: DNS Resolution
-echo "1. 🔍 DNS Resolution..."
-DNS_IP=$(dig +short $DOMAIN 2>/dev/null || nslookup $DOMAIN 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}' || echo "")
-if [ -n "$DNS_IP" ]; then
-    echo -e "   ✅ DNS OK: $DOMAIN → $DNS_IP"
-else
-    echo -e "   ${RED}❌ DNS FAILED${NC}"
-fi
-
-# Test 2: HTTP Connection
-echo "2. 🌐 HTTP Connection..."
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$DOMAIN --connect-timeout 10 2>/dev/null || echo "000")
-if [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "200" ]; then
-    echo -e "   ✅ HTTP OK: Status $HTTP_STATUS"
-else
-    echo -e "   ${RED}❌ HTTP FAILED: Status $HTTP_STATUS${NC}"
-fi
-
-# Test 3: HTTPS Connection
-echo "3. 🔒 HTTPS Connection..."
-HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN --connect-timeout 10 -k 2>/dev/null || echo "000")
-if [ "$HTTPS_STATUS" = "200" ]; then
-    echo -e "   ✅ HTTPS OK: Status $HTTPS_STATUS"
-else
-    echo -e "   ${RED}❌ HTTPS FAILED: Status $HTTPS_STATUS${NC}"
-fi
-
-# Test 4: SSL Certificate
-echo "4. 📜 SSL Certificate..."
-SSL_INFO=$(echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates 2>/dev/null || echo "")
-if [ -n "$SSL_INFO" ]; then
-    echo -e "   ✅ SSL Certificate OK"
-    echo "   $SSL_INFO"
-else
-    echo -e "   ${RED}❌ SSL Certificate FAILED${NC}"
-fi
-
-# Test 5: API Subdomain (nếu có)
-echo "5. 🔌 API Subdomain..."
-API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.$DOMAIN/health --connect-timeout 10 -k 2>/dev/null || echo "000")
-if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "401" ]; then
-    echo -e "   ✅ API OK: Status $API_STATUS"
-elif [ "$API_STATUS" = "000" ]; then
-    echo -e "   ${YELLOW}⚠️  API không được cấu hình${NC}"
-else
-    echo -e "   ${RED}❌ API FAILED: Status $API_STATUS${NC}"
-fi
-
-echo ""
-echo "📋 SUMMARY:"
-echo "==========="
-
-# Tổng kết
-if [ -n "$DNS_IP" ] && ([ "$HTTPS_STATUS" = "200" ] || [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]); then
-    echo -e "✅ ${GREEN}Domain $DOMAIN hoạt động tốt!${NC}"
-    echo "   🌐 Truy cập: https://$DOMAIN"
-    if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "401" ]; then
-        echo "   🔌 API: https://api.$DOMAIN"
-    fi
-else
-    echo -e "❌ ${RED}Domain $DOMAIN gặp vấn đề:${NC}"
-    
-    if [ -z "$DNS_IP" ]; then
-        echo "   • DNS chưa trỏ đúng - Kiểm tra bản ghi A record"
-    fi
-    
-    if [ "$HTTPS_STATUS" != "200" ] && [ "$HTTP_STATUS" != "301" ] && [ "$HTTP_STATUS" != "302" ]; then
-        echo "   • Web server không phản hồi - Kiểm tra Docker containers"
-    fi
-    
-    if [ -z "$SSL_INFO" ]; then
-        echo "   • SSL certificate chưa có - Đợi Let's Encrypt tạo certificate"
-    fi
-    
-    echo ""
-    echo "🔧 Khắc phục:"
-    echo "   1. Chạy debug chi tiết: ./debug-ssl.sh"
-    echo "   2. Kiểm tra containers: docker-compose ps"
-    echo "   3. Xem logs: docker-compose logs caddy"
-    echo "   4. Restart: docker-compose restart"
-fi
-
-echo ""
-echo "⏱️  DNS propagation có thể mất 5-60 phút"
-echo "🔄 Chạy lại: ./test-ssl-quick.sh $DOMAIN"
-EOF
-
-chmod +x $N8N_DIR/test-ssl-quick.sh
-
 # Tạo cron job để chạy mỗi 12 giờ
 echo "Thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày..."
 UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
@@ -2291,18 +1927,10 @@ FAILED_COMPONENTS=()
 
 # Kiểm tra trạng thái News API
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    # Kiểm tra container FastAPI
-    if ! docker ps &>/dev/null; then
-        DOCKER_CMD="sudo docker"
+    if systemctl is-active --quiet news-api; then
+        NEWS_API_STATUS="✅ Đang chạy"
     else
-        DOCKER_CMD="docker"
-    fi
-    
-    FASTAPI_CONTAINER=$($DOCKER_CMD ps -q --filter "name=fastapi" 2>/dev/null)
-    if [ -n "$FASTAPI_CONTAINER" ]; then
-        NEWS_API_STATUS="✅ Đang chạy (Container)"
-    else
-        NEWS_API_STATUS="❌ Container chưa khởi động"
+        NEWS_API_STATUS="❌ Lỗi khởi động"
         FAILED_COMPONENTS+=("News API")
     fi
 fi
@@ -2384,22 +2012,20 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "📰 NEWS CONTENT API:"
     echo "  - URL API: https://api.${DOMAIN}"
     echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
-    echo "  - Bearer Token: [Đã cấu hình - không hiển thị để bảo mật]"
-    echo "  - Trạng thái: $NEWS_API_STATUS"
+    echo "  - Bearer Token: [Đã cấu hình an toàn]"
+    echo "  - Trạng thái: Chạy qua Docker container"
     echo "  - Chức năng: Lấy nội dung tin tức với Newspaper4k"
     echo ""
     echo "  📋 CÁCH SỬ DỤNG NEWS API TRONG N8N:"
     echo "  1. Tạo HTTP Request node trong workflow"
     echo "  2. Method: POST"
     echo "  3. URL: https://api.${DOMAIN}/extract-article"
-    echo "  4. Headers: Authorization: Bearer [YOUR_TOKEN]"
+    echo "  4. Headers: Authorization: Bearer YOUR_TOKEN_HERE"
     echo "  5. Body: {\"url\": \"https://example.com/news-article\"}"
     echo ""
-    echo "  🔧 LỆNH TEST API (thay YOUR_TOKEN bằng token thực):"
-    echo "  curl -X POST \"https://api.${DOMAIN}/extract-article\" \\"
-    echo "       -H \"Content-Type: application/json\" \\"
-    echo "       -H \"Authorization: Bearer YOUR_TOKEN\" \\"
-    echo "       -d '{\"url\": \"https://dantri.com.vn/the-gioi.htm\"}'"
+    echo "  🔑 ĐỔI BEARER TOKEN:"
+    echo "  - Lệnh: $N8N_DIR/news_api/change_token.sh NEW_TOKEN"
+    echo "  - Ví dụ: $N8N_DIR/news_api/change_token.sh my-new-secret-123"
     echo ""
 fi
 
@@ -2413,19 +2039,16 @@ echo ""
 
 echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
 echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
-echo "  - 🔒 Debug SSL: $N8N_DIR/debug-ssl.sh"
-echo "  - ⚡ Test SSL nhanh: $N8N_DIR/test-ssl-quick.sh $DOMAIN"
 echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
 echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
-echo "  - 💾 Backup thủ công: $N8N_DIR/backup-workflows.sh"
-echo "  - 🧪 Test backup: $N8N_DIR/backup-manual.sh"
+echo "  - 💾 Backup thủ công: $N8N_DIR/manual-backup.sh"
+echo "  - 💾 Backup tự động: $N8N_DIR/backup-workflows.sh"
 echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
 echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - 🔄 Restart News API: cd $N8N_DIR && docker-compose restart fastapi"
-    echo "  - 📋 Xem logs News API: cd $N8N_DIR && docker-compose logs -f fastapi"
-    echo "  - 🔑 Đổi Bearer Token: sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=NEW_TOKEN/' $N8N_DIR/docker-compose.yml"
+    echo "  - 🔄 Restart News API: systemctl restart news-api"
+    echo "  - 📋 Xem logs News API: journalctl -u news-api -f"
 fi
 echo ""
 
@@ -2453,18 +2076,8 @@ echo "  - Đổi mật khẩu đăng nhập N8N sau khi truy cập lần đầu"
 echo "  - Backup định kỳ các workflow quan trọng"
 echo "  - Giám sát logs hệ thống thường xuyên"
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - Giữ bí mật Bearer Token của News API"
+    echo "  - Giữ bí mật Bearer Token của News API: $NEWS_API_TOKEN"
 fi
-echo ""
-echo "🚨 KHẮC PHỤC LỖI SSL (ERR_SSL_PROTOCOL_ERROR):"
-echo "  1. ⚡ Test nhanh: $N8N_DIR/test-ssl-quick.sh ${DOMAIN}"
-echo "  2. 🔒 Debug chi tiết: $N8N_DIR/debug-ssl.sh"
-echo "  3. 🌐 Kiểm tra DNS: dig ${DOMAIN} && dig api.${DOMAIN}"
-echo "  4. ⏰ Đợi DNS propagation (5-60 phút)"
-echo "  5. 🔄 Restart Caddy: cd $N8N_DIR && docker-compose restart caddy"
-echo "  6. 📋 Xem logs: cd $N8N_DIR && docker-compose logs caddy"
-echo "  7. 🏠 Test local: curl -H 'Host: ${DOMAIN}' http://localhost"
-echo "  8. 📝 Hosts entry (tạm thời): cat $N8N_DIR/hosts_entry.txt"
 
 # Thông báo đặc biệt về Puppeteer nếu không khả dụng
 if [[ "$PUPPETEER_INSTALL_STATUS" == *"Không khả dụng"* ]] || [[ "$PUPPETEER_INSTALL_STATUS" == *"Lỗi cài đặt"* ]]; then
@@ -2484,12 +2097,9 @@ echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
 echo ""
 
 echo "👨‍💻 THÔNG TIN TÁC GIẢ:"
-echo "  - Tác giả: Nguyễn Ngọc Thiện"
-echo "  - YouTube: Kalvin Thien Social"
-echo "  - Facebook: Ban Thien Handsome"
-echo "  - Zalo/Phone: 08.8888.4749"
-echo "  - Ngày cập nhật: 27/06/2025"
-echo "  - Phiên bản: N8N + FFmpeg + News API + Telegram Backup"
+echo "  - Script gốc: Nguyễn Ngọc Thiện"
+echo "  - YouTube: @EtoolsAICONTENT"
+echo "  - Phiên bản cải tiến: Tích hợp News API + Telegram Backup"
 echo ""
 echo "======================================================================"
 echo "🎯 CÀI ĐẶT HOÀN TẤT! CHÚC BẠN SỬ DỤNG N8N HIỆU QUẢ!"
