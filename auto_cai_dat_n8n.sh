@@ -108,12 +108,24 @@ done
 # Hàm kiểm tra domain
 check_domain() {
     local domain=$1
-    local server_ip=$(curl -s https://api.ipify.org)
-    local domain_ip=$(dig +short $domain)
+    local server_ip=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "")
+    local domain_ip=$(dig +short $domain 2>/dev/null || nslookup $domain 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}' || echo "")
+
+    echo "🔍 Kiểm tra DNS pointing:"
+    echo "  - Server IP: $server_ip"
+    echo "  - Domain IP: $domain_ip"
+    
+    # Kiểm tra nếu không lấy được IP
+    if [ -z "$server_ip" ] || [ -z "$domain_ip" ]; then
+        echo "⚠️  Không thể xác định IP. Tiếp tục cài đặt..."
+        return 0
+    fi
 
     if [ "$domain_ip" = "$server_ip" ]; then
+        echo "✅ Domain đã trỏ đúng"
         return 0  # Domain đã trỏ đúng
     else
+        echo "❌ Domain chưa trỏ đúng"
         return 1  # Domain chưa trỏ đúng
     fi
 }
@@ -306,12 +318,27 @@ fi
 # Kiểm tra domain
 echo "Kiểm tra domain $DOMAIN..."
 if check_domain $DOMAIN; then
-    echo "Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
+    echo "✅ Tiếp tục cài đặt với domain $DOMAIN"
 else
-    echo "Domain $DOMAIN chưa được trỏ đến server này."
-    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
-    echo "Sau khi cập nhật DNS, hãy chạy lại script này"
-    exit 1
+    echo ""
+    echo "⚠️  CẢNH BÁO: Domain chưa được trỏ đúng"
+    echo "📝 Hướng dẫn cấu hình DNS:"
+    echo "  1. Truy cập panel quản lý domain của bạn"
+    echo "  2. Tạo/sửa bản ghi A record:"
+    echo "     - Name: @ (hoặc để trống)"
+    echo "     - Type: A"
+    echo "     - Value: $(curl -s https://api.ipify.org 2>/dev/null || echo "SERVER_IP")"
+    echo "  3. Tạo bản ghi A record cho subdomain API:"
+    echo "     - Name: api"
+    echo "     - Type: A"
+    echo "     - Value: $(curl -s https://api.ipify.org 2>/dev/null || echo "SERVER_IP")"
+    echo ""
+    read -p "Bạn có muốn tiếp tục cài đặt không? (y/n): " CONTINUE_INSTALL
+    if [ "$CONTINUE_INSTALL" != "y" ] && [ "$CONTINUE_INSTALL" != "Y" ]; then
+        echo "Thoát cài đặt. Vui lòng cấu hình DNS và chạy lại script."
+        exit 1
+    fi
+    echo "⚠️  Tiếp tục cài đặt - SSL có thể thất bại nếu DNS chưa đúng"
 fi
 
 # Cài đặt Docker và Docker Compose
@@ -590,19 +617,113 @@ echo "Tạo file Caddyfile..."
 if [ "$SETUP_NEWS_API" = "y" ]; then
     # Caddyfile với cả domain chính và API subdomain
     cat << EOF > $N8N_DIR/Caddyfile
+# Main N8N domain
 ${DOMAIN} {
     reverse_proxy n8n:5678
+    
+    # SSL configuration
+    tls {
+        protocols tls1.2 tls1.3
+    }
+    
+    # Headers for security
+    header {
+        # Enable HSTS
+        Strict-Transport-Security max-age=31536000;
+        # Prevent MIME type sniffing
+        X-Content-Type-Options nosniff
+        # Prevent clickjacking
+        X-Frame-Options DENY
+        # XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Remove server header
+        -Server
+    }
+    
+    # Error handling
+    handle_errors {
+        @ssl_error expression {http.error.status_code} == 526
+        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
+    }
 }
 
+# News API subdomain
 api.${DOMAIN} {
     reverse_proxy fastapi:8000
+    
+    # SSL configuration
+    tls {
+        protocols tls1.2 tls1.3
+    }
+    
+    # Headers for API
+    header {
+        # CORS headers
+        Access-Control-Allow-Origin *
+        Access-Control-Allow-Methods "GET, POST, OPTIONS"
+        Access-Control-Allow-Headers "Authorization, Content-Type"
+        # Security headers
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        -Server
+    }
+    
+    # Handle preflight requests
+    @options method OPTIONS
+    respond @options 200
+    
+    # Error handling
+    handle_errors {
+        @ssl_error expression {http.error.status_code} == 526
+        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
+    }
+}
+
+# HTTP to HTTPS redirect (fallback)
+http://${DOMAIN} {
+    redir https://${DOMAIN}{uri} permanent
+}
+
+http://api.${DOMAIN} {
+    redir https://api.${DOMAIN}{uri} permanent
 }
 EOF
 else
     # Caddyfile chỉ có domain chính
     cat << EOF > $N8N_DIR/Caddyfile
+# Main N8N domain
 ${DOMAIN} {
     reverse_proxy n8n:5678
+    
+    # SSL configuration
+    tls {
+        protocols tls1.2 tls1.3
+    }
+    
+    # Headers for security
+    header {
+        # Enable HSTS
+        Strict-Transport-Security max-age=31536000;
+        # Prevent MIME type sniffing
+        X-Content-Type-Options nosniff
+        # Prevent clickjacking
+        X-Frame-Options DENY
+        # XSS protection
+        X-XSS-Protection "1; mode=block"
+        # Remove server header
+        -Server
+    }
+    
+    # Error handling
+    handle_errors {
+        @ssl_error expression {http.error.status_code} == 526
+        respond @ssl_error "SSL Error: Certificate issue detected. Please check DNS configuration." 503
+    }
+}
+
+# HTTP to HTTPS redirect
+http://${DOMAIN} {
+    redir https://${DOMAIN}{uri} permanent
 }
 EOF
 fi
@@ -1627,6 +1748,18 @@ fi
 echo "⏳ Đợi containers khởi động hoàn toàn (30 giây)..."
 sleep 30
 
+# Tạo file hosts entry cho testing local
+echo "📝 Tạo thông tin hosts entry cho testing..."
+SERVER_IP=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://ipv4.icanhazip.com 2>/dev/null || echo "127.0.0.1")
+cat << EOF > $N8N_DIR/hosts_entry.txt
+# Thêm vào file /etc/hosts để test local (nếu DNS chưa propagate)
+$SERVER_IP $DOMAIN
+$SERVER_IP api.$DOMAIN
+
+# Trên Windows: C:\Windows\System32\drivers\etc\hosts
+# Trên Linux/Mac: /etc/hosts
+EOF
+
 # Kiểm tra các container đã chạy chưa
 echo "🔍 Kiểm tra trạng thái containers..."
 
@@ -1906,6 +2039,247 @@ EOF
 
 chmod +x $N8N_DIR/troubleshoot.sh
 
+# Tạo script debug SSL
+echo "Tạo script debug SSL..."
+cat << 'EOF' > $N8N_DIR/debug-ssl.sh
+#!/bin/bash
+
+# Script debug SSL issues
+echo "🔍 SSL DEBUG SCRIPT"
+echo "=================="
+
+N8N_DIR="$(dirname "$0")"
+cd "$N8N_DIR"
+
+# Xác định docker command
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_CMD="docker"
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+fi
+
+# Lấy domain từ Caddyfile
+DOMAIN=$(grep -o '^[^{]*' Caddyfile | head -1 | sed 's/^# Main N8N domain//' | xargs)
+if [ -z "$DOMAIN" ]; then
+    DOMAIN=$(grep -E '^[a-zA-Z0-9.-]+\s*{' Caddyfile | head -1 | awk '{print $1}')
+fi
+
+echo "🌐 Domain được cấu hình: $DOMAIN"
+echo ""
+
+echo "1. Kiểm tra DNS Resolution..."
+echo "============================="
+echo ">> Domain chính:"
+dig +short $DOMAIN || nslookup $DOMAIN
+echo ""
+echo ">> API subdomain:"
+dig +short api.$DOMAIN || nslookup api.$DOMAIN
+echo ""
+
+echo "2. Kiểm tra Container Status..."
+echo "=============================="
+$DOCKER_CMD ps --filter "name=caddy" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+echo ""
+
+echo "3. Kiểm tra Caddy Logs..."
+echo "========================"
+echo ">> Caddy logs (20 dòng cuối):"
+$DOCKER_COMPOSE_CMD logs --tail=20 caddy
+echo ""
+
+echo "4. Test HTTP/HTTPS Connectivity..."
+echo "================================="
+echo ">> Test HTTP (should redirect):"
+curl -I -k http://$DOMAIN 2>/dev/null || echo "HTTP connection failed"
+echo ""
+echo ">> Test HTTPS:"
+curl -I -k https://$DOMAIN 2>/dev/null || echo "HTTPS connection failed"
+echo ""
+
+if [ -n "$(docker ps -q --filter 'name=fastapi')" ]; then
+    echo ">> Test API HTTP:"
+    curl -I -k http://api.$DOMAIN 2>/dev/null || echo "API HTTP connection failed"
+    echo ""
+    echo ">> Test API HTTPS:"
+    curl -I -k https://api.$DOMAIN 2>/dev/null || echo "API HTTPS connection failed"
+    echo ""
+fi
+
+echo "5. Kiểm tra SSL Certificate..."
+echo "============================="
+echo ">> SSL Certificate info cho $DOMAIN:"
+echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates -subject -issuer 2>/dev/null || echo "Không thể lấy thông tin SSL certificate"
+echo ""
+
+echo "6. Kiểm tra Firewall và Ports..."
+echo "================================"
+echo ">> Listening ports:"
+netstat -tuln | grep -E ':(80|443|5678|8000)\s'
+echo ""
+
+echo "7. Caddyfile Configuration..."
+echo "============================"
+echo ">> Current Caddyfile:"
+cat Caddyfile
+echo ""
+
+echo "8. Khuyến nghị khắc phục..."
+echo "=========================="
+echo "Nếu gặp lỗi SSL:"
+echo "1. Kiểm tra DNS đã trỏ đúng chưa (có thể mất 5-60 phút)"
+echo "2. Restart Caddy: $DOCKER_COMPOSE_CMD restart caddy"
+echo "3. Xem logs chi tiết: $DOCKER_COMPOSE_CMD logs -f caddy"
+echo "4. Kiểm tra firewall: ufw status"
+echo "5. Test local: curl -H 'Host: $DOMAIN' http://localhost"
+echo ""
+
+echo "🔧 Lệnh khắc phục nhanh:"
+echo "========================"
+echo "# Restart tất cả containers:"
+echo "$DOCKER_COMPOSE_CMD restart"
+echo ""
+echo "# Force rebuild SSL:"
+echo "$DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d"
+echo ""
+echo "# Xóa SSL cache (nếu cần):"
+echo "$DOCKER_CMD volume ls | grep caddy && $DOCKER_CMD volume rm \$(docker volume ls -q | grep caddy)"
+echo ""
+
+read -p "Bạn có muốn restart Caddy ngay bây giờ? (y/n): " RESTART_CHOICE
+if [ "$RESTART_CHOICE" = "y" ] || [ "$RESTART_CHOICE" = "Y" ]; then
+    echo "🔄 Đang restart Caddy..."
+    $DOCKER_COMPOSE_CMD restart caddy
+    echo "✅ Hoàn tất restart. Đợi 30 giây để SSL certificate được tạo..."
+    sleep 30
+    echo "Test lại HTTPS:"
+    curl -I -k https://$DOMAIN || echo "Vẫn gặp lỗi SSL"
+fi
+EOF
+
+chmod +x $N8N_DIR/debug-ssl.sh
+
+# Tạo script test SSL nhanh
+echo "Tạo script test SSL nhanh..."
+cat << 'EOF' > $N8N_DIR/test-ssl-quick.sh
+#!/bin/bash
+
+# Script test SSL nhanh cho N8N
+echo "🔍 QUICK SSL TEST"
+echo "================="
+
+# Màu sắc
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Lấy domain từ tham số hoặc hỏi người dùng
+if [ -z "$1" ]; then
+    read -p "Nhập domain của bạn: " DOMAIN
+else
+    DOMAIN=$1
+fi
+
+echo "🌐 Testing domain: $DOMAIN"
+echo ""
+
+# Test 1: DNS Resolution
+echo "1. 🔍 DNS Resolution..."
+DNS_IP=$(dig +short $DOMAIN 2>/dev/null || nslookup $DOMAIN 2>/dev/null | grep -A1 "Name:" | tail -1 | awk '{print $2}' || echo "")
+if [ -n "$DNS_IP" ]; then
+    echo -e "   ✅ DNS OK: $DOMAIN → $DNS_IP"
+else
+    echo -e "   ${RED}❌ DNS FAILED${NC}"
+fi
+
+# Test 2: HTTP Connection
+echo "2. 🌐 HTTP Connection..."
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://$DOMAIN --connect-timeout 10 2>/dev/null || echo "000")
+if [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ] || [ "$HTTP_STATUS" = "200" ]; then
+    echo -e "   ✅ HTTP OK: Status $HTTP_STATUS"
+else
+    echo -e "   ${RED}❌ HTTP FAILED: Status $HTTP_STATUS${NC}"
+fi
+
+# Test 3: HTTPS Connection
+echo "3. 🔒 HTTPS Connection..."
+HTTPS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://$DOMAIN --connect-timeout 10 -k 2>/dev/null || echo "000")
+if [ "$HTTPS_STATUS" = "200" ]; then
+    echo -e "   ✅ HTTPS OK: Status $HTTPS_STATUS"
+else
+    echo -e "   ${RED}❌ HTTPS FAILED: Status $HTTPS_STATUS${NC}"
+fi
+
+# Test 4: SSL Certificate
+echo "4. 📜 SSL Certificate..."
+SSL_INFO=$(echo | openssl s_client -servername $DOMAIN -connect $DOMAIN:443 2>/dev/null | openssl x509 -noout -dates 2>/dev/null || echo "")
+if [ -n "$SSL_INFO" ]; then
+    echo -e "   ✅ SSL Certificate OK"
+    echo "   $SSL_INFO"
+else
+    echo -e "   ${RED}❌ SSL Certificate FAILED${NC}"
+fi
+
+# Test 5: API Subdomain (nếu có)
+echo "5. 🔌 API Subdomain..."
+API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.$DOMAIN/health --connect-timeout 10 -k 2>/dev/null || echo "000")
+if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "401" ]; then
+    echo -e "   ✅ API OK: Status $API_STATUS"
+elif [ "$API_STATUS" = "000" ]; then
+    echo -e "   ${YELLOW}⚠️  API không được cấu hình${NC}"
+else
+    echo -e "   ${RED}❌ API FAILED: Status $API_STATUS${NC}"
+fi
+
+echo ""
+echo "📋 SUMMARY:"
+echo "==========="
+
+# Tổng kết
+if [ -n "$DNS_IP" ] && ([ "$HTTPS_STATUS" = "200" ] || [ "$HTTP_STATUS" = "301" ] || [ "$HTTP_STATUS" = "302" ]); then
+    echo -e "✅ ${GREEN}Domain $DOMAIN hoạt động tốt!${NC}"
+    echo "   🌐 Truy cập: https://$DOMAIN"
+    if [ "$API_STATUS" = "200" ] || [ "$API_STATUS" = "401" ]; then
+        echo "   🔌 API: https://api.$DOMAIN"
+    fi
+else
+    echo -e "❌ ${RED}Domain $DOMAIN gặp vấn đề:${NC}"
+    
+    if [ -z "$DNS_IP" ]; then
+        echo "   • DNS chưa trỏ đúng - Kiểm tra bản ghi A record"
+    fi
+    
+    if [ "$HTTPS_STATUS" != "200" ] && [ "$HTTP_STATUS" != "301" ] && [ "$HTTP_STATUS" != "302" ]; then
+        echo "   • Web server không phản hồi - Kiểm tra Docker containers"
+    fi
+    
+    if [ -z "$SSL_INFO" ]; then
+        echo "   • SSL certificate chưa có - Đợi Let's Encrypt tạo certificate"
+    fi
+    
+    echo ""
+    echo "🔧 Khắc phục:"
+    echo "   1. Chạy debug chi tiết: ./debug-ssl.sh"
+    echo "   2. Kiểm tra containers: docker-compose ps"
+    echo "   3. Xem logs: docker-compose logs caddy"
+    echo "   4. Restart: docker-compose restart"
+fi
+
+echo ""
+echo "⏱️  DNS propagation có thể mất 5-60 phút"
+echo "🔄 Chạy lại: ./test-ssl-quick.sh $DOMAIN"
+EOF
+
+chmod +x $N8N_DIR/test-ssl-quick.sh
+
 # Tạo cron job để chạy mỗi 12 giờ
 echo "Thiết lập cron job cập nhật tự động mỗi 12 giờ và sao lưu hàng ngày..."
 UPDATE_CRON="0 */12 * * * $N8N_DIR/update-n8n.sh"
@@ -2039,6 +2413,8 @@ echo ""
 
 echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
 echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
+echo "  - 🔒 Debug SSL: $N8N_DIR/debug-ssl.sh"
+echo "  - ⚡ Test SSL nhanh: $N8N_DIR/test-ssl-quick.sh $DOMAIN"
 echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
 echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
 echo "  - 💾 Backup thủ công: $N8N_DIR/backup-workflows.sh"
@@ -2077,8 +2453,18 @@ echo "  - Đổi mật khẩu đăng nhập N8N sau khi truy cập lần đầu"
 echo "  - Backup định kỳ các workflow quan trọng"
 echo "  - Giám sát logs hệ thống thường xuyên"
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - Giữ bí mật Bearer Token của News API: $NEWS_API_TOKEN"
+    echo "  - Giữ bí mật Bearer Token của News API"
 fi
+echo ""
+echo "🚨 KHẮC PHỤC LỖI SSL (ERR_SSL_PROTOCOL_ERROR):"
+echo "  1. ⚡ Test nhanh: $N8N_DIR/test-ssl-quick.sh ${DOMAIN}"
+echo "  2. 🔒 Debug chi tiết: $N8N_DIR/debug-ssl.sh"
+echo "  3. 🌐 Kiểm tra DNS: dig ${DOMAIN} && dig api.${DOMAIN}"
+echo "  4. ⏰ Đợi DNS propagation (5-60 phút)"
+echo "  5. 🔄 Restart Caddy: cd $N8N_DIR && docker-compose restart caddy"
+echo "  6. 📋 Xem logs: cd $N8N_DIR && docker-compose logs caddy"
+echo "  7. 🏠 Test local: curl -H 'Host: ${DOMAIN}' http://localhost"
+echo "  8. 📝 Hosts entry (tạm thời): cat $N8N_DIR/hosts_entry.txt"
 
 # Thông báo đặc biệt về Puppeteer nếu không khả dụng
 if [[ "$PUPPETEER_INSTALL_STATUS" == *"Không khả dụng"* ]] || [[ "$PUPPETEER_INSTALL_STATUS" == *"Lỗi cài đặt"* ]]; then
