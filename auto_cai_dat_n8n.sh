@@ -333,7 +333,7 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
+# Tạo Dockerfile - với tên miền phụ đã nhập để đảm bảo được khởi động đúng
 echo "Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
@@ -399,7 +399,7 @@ USER node
 WORKDIR /home/node
 EOF
 
-# Tạo file docker-compose.yml
+# Tạo file docker-compose.yml 
 echo "Tạo file docker-compose.yml..."
 cat << EOF > $N8N_DIR/docker-compose.yml
 # Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
@@ -435,12 +435,29 @@ services:
     user: "1000:1000"
     cap_add:
       - SYS_ADMIN  # Thêm quyền cho Puppeteer
+  fastapi:
+    build:
+      context: ./news_api
+      dockerfile: Dockerfile
+    image: fastapi-latest
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - NEWS_API_TOKEN=${NEWS_API_TOKEN}
+      - NEWS_API_HOST=0.0.0.0
+      - NEWS_API_PORT=8000
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ${N8N_DIR}/news_api:/app
+    depends_on:
+      - n8n
 
   caddy:
     image: caddy:2
     restart: always
     ports:
-      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
+      - "80:80"  
       - "443:443"
     volumes:
       - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
@@ -618,7 +635,7 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     # Cài đặt các thư viện cần thiết
     echo "Cài đặt các thư viện Python cần thiết..."
     $N8N_DIR/news_api/venv/bin/pip install --upgrade pip
-    $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser
+    $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser lxml
     
     # Tạo file main.py cho FastAPI
     cat << 'EOF' > $N8N_DIR/news_api/main.py
@@ -646,7 +663,7 @@ from newspaper import Article, Source
 # Cấu hình
 API_TOKEN = os.getenv("NEWS_API_TOKEN", "your-secret-token-here")
 API_HOST = os.getenv("NEWS_API_HOST", "0.0.0.0")
-API_PORT = int(os.getenv("NEWS_API_PORT", "8001"))
+API_PORT = int(os.getenv("NEWS_API_PORT", "8000"))
 
 # FastAPI app
 app = FastAPI(
@@ -970,7 +987,7 @@ EOF
 # Cấu hình môi trường
 export NEWS_API_TOKEN="$NEWS_API_TOKEN"
 export NEWS_API_HOST="0.0.0.0"
-export NEWS_API_PORT="8001"
+export NEWS_API_PORT="8000"
 
 # Khởi động News API
 cd "$N8N_DIR/news_api"
@@ -990,7 +1007,7 @@ User=root
 WorkingDirectory=$N8N_DIR/news_api
 Environment=NEWS_API_TOKEN=$NEWS_API_TOKEN
 Environment=NEWS_API_HOST=0.0.0.0
-Environment=NEWS_API_PORT=8001
+Environment=NEWS_API_PORT=8000
 ExecStart=$N8N_DIR/news_api/venv/bin/python $N8N_DIR/news_api/main.py
 Restart=always
 RestartSec=10
@@ -1015,7 +1032,7 @@ ${DOMAIN} {
 }
 
 api.${DOMAIN} {
-    reverse_proxy localhost:8001
+    reverse_proxy localhost:8000
 }
 EOF
 
