@@ -1,3 +1,135 @@
+#!/bin/bash
+
+# Hiển thị banner
+echo "======================================================================"
+echo "     Script cài đặt N8N với FFmpeg, yt-dlp, Puppeteer và SSL tự động  "
+echo "======================================================================"
+
+# Kiểm tra xem script có được chạy với quyền root không
+if [[ $EUID -ne 0 ]]; then
+   echo "Script này cần được chạy với quyền root" 
+   exit 1
+fi
+
+# Hàm thiết lập swap tự động
+setup_swap() {
+    echo "Kiểm tra và thiết lập swap tự động..."
+    
+    # Kiểm tra nếu swap đã được bật
+    if [ "$(swapon --show | wc -l)" -gt 0 ]; then
+        SWAP_SIZE=$(free -h | grep Swap | awk '{print $2}')
+        echo "Swap đã được bật với kích thước ${SWAP_SIZE}. Bỏ qua thiết lập."
+        return
+    fi
+    
+    # Lấy thông tin RAM (đơn vị MB)
+    RAM_MB=$(free -m | grep Mem | awk '{print $2}')
+    
+    # Tính toán kích thước swap dựa trên RAM
+    if [ "$RAM_MB" -le 2048 ]; then
+        # Với RAM <= 2GB, swap = 2x RAM
+        SWAP_SIZE=$((RAM_MB * 2))
+    elif [ "$RAM_MB" -gt 2048 ] && [ "$RAM_MB" -le 8192 ]; then
+        # Với 2GB < RAM <= 8GB, swap = RAM
+        SWAP_SIZE=$RAM_MB
+    else
+        # Với RAM > 8GB, swap = 4GB
+        SWAP_SIZE=4096
+    fi
+    
+    # Chuyển đổi sang GB cho dễ nhìn (làm tròn lên)
+    SWAP_GB=$(( (SWAP_SIZE + 1023) / 1024 ))
+    
+    echo "Đang thiết lập swap với kích thước ${SWAP_GB}GB (${SWAP_SIZE}MB)..."
+    
+    # Tạo swap file với đơn vị MB
+    dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE status=progress
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    
+    # Thêm vào fstab để swap được kích hoạt sau khi khởi động lại
+    if ! grep -q "/swapfile" /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+    
+    # Cấu hình swappiness và cache pressure
+    sysctl vm.swappiness=10
+    sysctl vm.vfs_cache_pressure=50
+    
+    # Lưu cấu hình vào sysctl.conf nếu chưa có
+    if ! grep -q "vm.swappiness" /etc/sysctl.conf; then
+        echo "vm.swappiness=10" >> /etc/sysctl.conf
+    fi
+    
+    if ! grep -q "vm.vfs_cache_pressure" /etc/sysctl.conf; then
+        echo "vm.vfs_cache_pressure=50" >> /etc/sysctl.conf
+    fi
+    
+    echo "Đã thiết lập swap với kích thước ${SWAP_GB}GB thành công."
+    echo "Swappiness đã được đặt thành 10 (mặc định: 60)"
+    echo "Vfs_cache_pressure đã được đặt thành 50 (mặc định: 100)"
+}
+
+# Hàm hiển thị trợ giúp
+show_help() {
+    echo "Cách sử dụng: $0 [tùy chọn]"
+    echo "Tùy chọn:"
+    echo "  -h, --help      Hiển thị trợ giúp này"
+    echo "  -d, --dir DIR   Chỉ định thư mục cài đặt n8n (mặc định: /home/n8n)"
+    echo "  -s, --skip-docker Bỏ qua cài đặt Docker (nếu đã có)"
+    exit 0
+}
+
+# Xử lý tham số dòng lệnh
+N8N_DIR="/home/n8n"
+SKIP_DOCKER=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_help
+            ;;
+        -d|--dir)
+            N8N_DIR="$2"
+            shift 2
+            ;;
+        -s|--skip-docker)
+            SKIP_DOCKER=true
+            shift
+            ;;
+        *)
+            echo "Tùy chọn không hợp lệ: $1"
+            show_help
+            ;;
+    esac
+done
+
+# Hàm kiểm tra domain
+check_domain() {
+    local domain=$1
+    local server_ip=$(curl -s https://api.ipify.org)
+    local domain_ip=$(dig +short $domain)
+
+    if [ "$domain_ip" = "$server_ip" ]; then
+        return 0  # Domain đã trỏ đúng
+    else
+        return 1  # Domain chưa trỏ đúng
+    fi
+}
+
+# Hàm kiểm tra các lệnh cần thiết
+check_commands() {
+    if ! command -v dig &> /dev/null; then
+        echo "Cài đặt dnsutils (để sử dụng lệnh dig)..."
+        apt-get update
+        apt-get install -y dnsutils
+    fi
+}
+
+# Thiết lập swap
+setup_swap
+
 # Hàm cài đặt Docker
 install_docker() {
     if $SKIP_DOCKER; then
@@ -19,7 +151,16 @@ install_docker() {
     
     # Cài đặt Docker
     apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    apt-get install -y docker-ce docker-ce-cli containerd.io
+    
+    # Cài đặt Docker Compose
+    if ! command -v docker-compose &> /dev/null && ! command -v docker &> /dev/null; then
+        echo "Cài đặt Docker Compose..."
+        apt-get install -y docker-compose
+    elif command -v docker &> /dev/null && ! docker compose version &> /dev/null; then
+        echo "Cài đặt Docker Compose plugin..."
+        apt-get install -y docker-compose-plugin
+    fi
     
     # Kiểm tra Docker đã cài đặt thành công chưa
     if ! command -v docker &> /dev/null; then
@@ -27,8 +168,8 @@ install_docker() {
         exit 1
     fi
 
-    if ! docker compose version &> /dev/null; then
-        echo "Lỗi: Docker Compose plugin chưa được cài đặt đúng cách."
+    if ! command -v docker-compose &> /dev/null && ! (command -v docker &> /dev/null && docker compose version &> /dev/null); then
+        echo "Lỗi: Docker Compose chưa được cài đặt đúng cách."
         exit 1
     fi
 
@@ -70,21 +211,7 @@ systemctl start cron
 check_commands
 
 # Nhận input domain từ người dùng
-if $LOCALHOST_MODE; then
-    DOMAIN="localhost"
-    DOMAIN_MODE="localhost"
-    echo "🏠 Đã chọn chế độ localhost: không cần domain và SSL"
-else
-    read -p "Nhập tên miền hoặc tên miền phụ của bạn (hoặc 'localhost' cho chế độ local): " DOMAIN
-    if [ "$DOMAIN" = "localhost" ]; then
-        LOCALHOST_MODE=true
-        DOMAIN_MODE="localhost"
-        echo "🏠 Đã chọn chế độ localhost: $DOMAIN"
-    else
-        DOMAIN_MODE="domain"
-        echo "🌐 Đã chọn chế độ domain: $DOMAIN"
-    fi
-fi
+read -p "Nhập tên miền hoặc tên miền phụ của bạn: " DOMAIN
 
 # Cấu hình Telegram backup (tùy chọn)
 echo ""
@@ -126,21 +253,19 @@ else
     SETUP_NEWS_API="n"
 fi
 
-# Kiểm tra domain (chỉ khi không phải localhost mode)
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    echo "Kiểm tra domain $DOMAIN..."
-    if check_domain $DOMAIN; then
-        echo "✅ Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
-    else
-        echo "Domain $DOMAIN chưa được trỏ đến server này."
-        echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
-        echo "Sau khi cập nhật DNS, hãy chạy lại script này"
-        exit 1
-    fi
+# Kiểm tra domain
+echo "Kiểm tra domain $DOMAIN..."
+if check_domain $DOMAIN; then
+    echo "Domain $DOMAIN đã được trỏ đúng đến server này. Tiếp tục cài đặt"
+else
+    echo "Domain $DOMAIN chưa được trỏ đến server này."
+    echo "Vui lòng cập nhật bản ghi DNS để trỏ $DOMAIN đến IP $(curl -s https://api.ipify.org)"
+    echo "Sau khi cập nhật DNS, hãy chạy lại script này"
+    exit 1
 fi
 
 # Cài đặt Docker và Docker Compose
-install_docker 
+install_docker
 
 # Function cleanup containers và images cũ
 cleanup_old_installation() {
@@ -150,10 +275,14 @@ cleanup_old_installation() {
     if [ -d "$N8N_DIR" ]; then
         cd "$N8N_DIR"
         
-        # Dừng và xóa containers bằng docker compose nếu có
-        if [ -f "docker-compose.yml" ] || [ -f "compose.yml" ]; then
-            echo "Dừng containers với docker compose..."
-            docker compose down --remove-orphans --volumes 2>/dev/null || true
+        # Dừng và xóa containers bằng docker-compose nếu có
+        if [ -f "docker-compose.yml" ]; then
+            echo "Dừng containers với docker-compose..."
+            if command -v docker-compose &> /dev/null; then
+                docker-compose down --remove-orphans --volumes 2>/dev/null || true
+            elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+                docker compose down --remove-orphans --volumes 2>/dev/null || true
+            fi
         fi
     fi
     
@@ -204,7 +333,7 @@ mkdir -p $N8N_DIR/files/temp
 mkdir -p $N8N_DIR/files/youtube_content_anylystic
 mkdir -p $N8N_DIR/files/backup_full
 
-# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER cải tiến
+# Tạo Dockerfile - CẬP NHẬT VỚI PUPPETEER
 echo "Tạo Dockerfile để cài đặt n8n với FFmpeg, yt-dlp và Puppeteer..."
 cat << 'EOF' > $N8N_DIR/Dockerfile
 FROM n8nio/n8n:latest
@@ -219,7 +348,7 @@ RUN apk update && \
 RUN pip3 install --break-system-packages -U yt-dlp && \
     chmod +x /usr/bin/yt-dlp
 
-# Cài đặt Puppeteer dependencies (cải tiến)
+# Cài đặt Puppeteer dependencies (với error handling)
 RUN apk add --no-cache \
     chromium \
     nss \
@@ -232,105 +361,48 @@ RUN apk add --no-cache \
     font-noto \
     font-noto-cjk \
     font-noto-emoji \
-    font-noto-symbols \
-    font-noto-symbols2 \
     dbus \
-    dbus-x11 \
     udev \
-    xvfb \
-    && fc-cache -f
+    || echo "Warning: Some Puppeteer dependencies failed to install"
 
-# Thiết lập biến môi trường cho Puppeteer
+# Thiết lập biến môi trường cho Puppeteer (nếu có)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
-    CHROME_BIN=/usr/bin/chromium-browser \
-    CHROME_PATH=/usr/bin/chromium-browser \
-    DISPLAY=:99
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-# Cài đặt n8n-nodes-puppeteer với cải tiến
+# Cài đặt n8n-nodes-puppeteer (với error handling)
 WORKDIR /usr/local/lib/node_modules/n8n
-RUN npm install n8n-nodes-puppeteer@latest || echo "Warning: n8n-nodes-puppeteer installation failed"
+RUN npm install n8n-nodes-puppeteer || echo "Warning: n8n-nodes-puppeteer installation failed, skipping..."
 
-# Cài đặt puppeteer-core để đảm bảo compatibility
-RUN npm install puppeteer-core@latest || echo "Warning: puppeteer-core installation failed"
-
-# Kiểm tra cài đặt các công cụ
+# Kiểm tra cài đặt các công cụ (với error handling cho Puppeteer)
 RUN ffmpeg -version && \
     wget --version | head -n 1 && \
     zip --version | head -n 2 && \
     yt-dlp --version
 
-# Kiểm tra Chromium và tạo script test
-RUN echo '#!/bin/sh' > /usr/local/bin/test-chromium && \
-    echo 'xvfb-run -a chromium-browser --headless --disable-gpu --no-sandbox --disable-setuid-sandbox --dump-dom https://www.google.com > /dev/null 2>&1' >> /usr/local/bin/test-chromium && \
-    chmod +x /usr/local/bin/test-chromium
+# Kiểm tra Chromium (tùy chọn)
+RUN chromium-browser --version || echo "Warning: Chromium not available, Puppeteer features will be disabled"
 
-# Tạo thư mục và set quyền
+# Tạo thư mục youtube_content_anylystic và backup_full và set đúng quyền
 RUN mkdir -p /files/youtube_content_anylystic && \
     mkdir -p /files/backup_full && \
     chown -R node:node /files
 
-# Test Puppeteer và tạo status file
-RUN if test-chromium; then \
+# Tạo file cảnh báo về trạng thái Puppeteer
+RUN if command -v chromium-browser >/dev/null 2>&1; then \
         echo "Puppeteer: AVAILABLE" > /files/puppeteer_status.txt; \
     else \
         echo "Puppeteer: NOT_AVAILABLE" > /files/puppeteer_status.txt; \
     fi
 
-# Tạo user directory với quyền phù hợp
-RUN mkdir -p /home/node/.cache /home/node/.npm && \
-    chown -R node:node /home/node
-
 # Trở lại user node
 USER node
 WORKDIR /home/node
-EOF 
+EOF
 
 # Tạo file docker-compose.yml
 echo "Tạo file docker-compose.yml..."
-if [ "$DOMAIN_MODE" = "localhost" ]; then
-    # Localhost mode: Không cần Caddy, chạy trực tiếp trên port 5678
-    cat << EOF > $N8N_DIR/docker-compose.yml
-# Cấu hình Docker Compose cho N8N (LOCALHOST MODE)
-services:
-  n8n:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: n8n-ffmpeg-latest
-    restart: always
-    ports:
-      - "5678:5678"
-    environment:
-      - N8N_HOST=localhost
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=http://localhost:5678
-      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      # Cấu hình binary data mode
-      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
-      - N8N_BINARY_DATA_STORAGE=/files
-      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
-      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=304857600
-      # Cấu hình Puppeteer
-      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-      - CHROME_BIN=/usr/bin/chromium-browser
-      - DISPLAY=:99
-    volumes:
-      - ${N8N_DIR}:/home/node/.n8n
-      - ${N8N_DIR}/files:/files
-    user: "1000:1000"
-    cap_add:
-      - SYS_ADMIN  # Thêm quyền cho Puppeteer
-EOF
-else
-    # Domain mode: Sử dụng Caddy làm reverse proxy với SSL
-    cat << EOF > $N8N_DIR/docker-compose.yml
-# Cấu hình Docker Compose cho N8N (DOMAIN MODE)
+cat << EOF > $N8N_DIR/docker-compose.yml
+# Cấu hình Docker Compose cho N8N với FFmpeg, yt-dlp, và Puppeteer
 services:
   n8n:
     build:
@@ -357,8 +429,6 @@ services:
       # Cấu hình Puppeteer
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-      - CHROME_BIN=/usr/bin/chromium-browser
-      - DISPLAY=:99
     volumes:
       - ${N8N_DIR}:/home/node/.n8n
       - ${N8N_DIR}/files:/files
@@ -370,7 +440,7 @@ services:
     image: caddy:2
     restart: always
     ports:
-      - "80:80"
+      - "8080:80"  # Sử dụng cổng 8080 thay vì 80 để tránh xung đột
       - "443:443"
     volumes:
       - ${N8N_DIR}/Caddyfile:/etc/caddy/Caddyfile
@@ -383,104 +453,14 @@ volumes:
   caddy_data:
   caddy_config:
 EOF
-fi
 
-# Tạo file Caddyfile (chỉ cần trong domain mode)
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    echo "Tạo file Caddyfile..."
-    if [ "$SETUP_NEWS_API" = "y" ]; then
-        # Caddyfile với hỗ trợ cả domain chính và subdomain API
-        cat << EOF > $N8N_DIR/Caddyfile
-# Cấu hình Caddy cho N8N với SSL tự động
-# Tác giả: Nguyễn Ngọc Thiện - YouTube: @kalvinthiensocial
-
-${DOMAIN} {
-    # N8N Main Domain
-    reverse_proxy n8n:5678
-    
-    # Thêm headers bảo mật
-    header {
-        # Bảo mật header
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        X-XSS-Protection "1; mode=block"
-        
-        # Thông tin tác giả
-        X-Powered-By "N8N + Caddy by Nguyễn Ngọc Thiện"
-        X-Author "YouTube: @kalvinthiensocial"
-        X-Contact "Facebook: Ban.Thien.Handsome | Zalo: 08.8888.4749"
-    }
-    
-    # Logging
-    log {
-        output file /var/log/caddy/n8n-access.log
-        format json
-    }
-}
-
-api.${DOMAIN} {
-    # News API Subdomain
-    reverse_proxy host.docker.internal:8001
-    
-    # Thêm headers bảo mật cho API
-    header {
-        # Bảo mật header
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        X-XSS-Protection "1; mode=block"
-        
-        # CORS cho API
-        Access-Control-Allow-Origin "*"
-        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
-        Access-Control-Allow-Headers "Authorization, Content-Type"
-        
-        # Thông tin tác giả
-        X-API-Author "Nguyễn Ngọc Thiện"
-        X-API-Version "News Content API v1.0"
-        X-Support "YouTube: @kalvinthiensocial"
-    }
-    
-    # Logging
-    log {
-        output file /var/log/caddy/api-access.log
-        format json
-    }
-}
-EOF
-    else
-        # Caddyfile chỉ cho N8N
-        cat << EOF > $N8N_DIR/Caddyfile
-# Cấu hình Caddy cho N8N với SSL tự động
-# Tác giả: Nguyễn Ngọc Thiện - YouTube: @kalvinthiensocial
-
+# Tạo file Caddyfile
+echo "Tạo file Caddyfile..."
+cat << EOF > $N8N_DIR/Caddyfile
 ${DOMAIN} {
     reverse_proxy n8n:5678
-    
-    # Thêm headers bảo mật
-    header {
-        # Bảo mật header
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        X-XSS-Protection "1; mode=block"
-        
-        # Thông tin tác giả
-        X-Powered-By "N8N + Caddy by Nguyễn Ngọc Thiện"
-        X-Author "YouTube: @kalvinthiensocial"
-        X-Contact "Facebook: Ban.Thien.Handsome | Zalo: 08.8888.4749"
-    }
-    
-    # Logging
-    log {
-        output file /var/log/caddy/n8n-access.log
-        format json
-    }
 }
 EOF
-    fi
-fi
 
 # Tạo script sao lưu workflow và credentials
 echo "Tạo script sao lưu workflow và credentials..."
@@ -574,8 +554,6 @@ Backup Date: \$(date)
 N8N Directory: \$N8N_DIR
 Container ID: \$N8N_CONTAINER
 Workflows Count: \$(echo "\$WORKFLOWS" | jq length 2>/dev/null || echo "0")
-Backup By: Script của Nguyễn Ngọc Thiện
-YouTube: @kalvinthiensocial
 BACKUP_INFO
 
 # Tạo file tar nén
@@ -608,7 +586,7 @@ if [ -f "\$N8N_DIR/telegram_config.txt" ]; then
         curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendDocument" \
             -F chat_id="\$TELEGRAM_CHAT_ID" \
             -F document=@"\$BACKUP_FILE" \
-            -F caption="🔄 Backup N8N tự động - \$(date '+%d/%m/%Y %H:%M:%S')%0AKích thước: \$BACKUP_SIZE%0A👨‍💻 By: Nguyễn Ngọc Thiện" \
+            -F caption="🔄 Backup N8N tự động - \$(date '+%d/%m/%Y %H:%M:%S')%0AKích thước: \$BACKUP_SIZE" \
             > /dev/null 2>&1 && log "Đã gửi backup qua Telegram thành công" || log "Lỗi gửi backup qua Telegram"
     fi
 fi
@@ -637,24 +615,15 @@ if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "Tạo môi trường ảo Python cho News API..."
     python3 -m venv $N8N_DIR/news_api/venv
     
-    # Cài đặt các thư viện cần thiết - SỬA LỖI LXML
+    # Cài đặt các thư viện cần thiết
     echo "Cài đặt các thư viện Python cần thiết..."
     $N8N_DIR/news_api/venv/bin/pip install --upgrade pip
-    # Cài đặt lxml với html_clean trước
-    $N8N_DIR/news_api/venv/bin/pip install "lxml[html_clean]" lxml_html_clean
-    # Cài đặt các thư viện khác
     $N8N_DIR/news_api/venv/bin/pip install fastapi uvicorn newspaper4k fake-useragent python-multipart pydantic requests beautifulsoup4 feedparser
-
-    # Tạo file main.py cho FastAPI với cải tiến
+    
+    # Tạo file main.py cho FastAPI
     cat << 'EOF' > $N8N_DIR/news_api/main.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-News Content API - Tác giả: Nguyễn Ngọc Thiện
-YouTube: @kalvinthiensocial
-Facebook: Ban.Thien.Handsome
-Zalo/SĐT: 08.8888.4749
-"""
 
 import os
 import asyncio
@@ -679,27 +648,13 @@ API_TOKEN = os.getenv("NEWS_API_TOKEN", "your-secret-token-here")
 API_HOST = os.getenv("NEWS_API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("NEWS_API_PORT", "8001"))
 
-# FastAPI app với thông tin tác giả
+# FastAPI app
 app = FastAPI(
-    title="📰 News Content API by Nguyễn Ngọc Thiện",
-    description="""
-    API lấy nội dung tin tức sử dụng Newspaper4k
-    
-    🎬 **Tác giả**: Nguyễn Ngọc Thiện  
-    📺 **YouTube**: [@kalvinthiensocial](https://www.youtube.com/@kalvinthiensocial)  
-    📱 **Facebook**: [Ban.Thien.Handsome](https://www.facebook.com/Ban.Thien.Handsome/)  
-    📞 **Zalo/SĐT**: 08.8888.4749  
-    
-    🔐 **Bearer Token**: Để bảo mật, token thật được ẩn trong docs này
-    """,
+    title="📰 News Content API",
+    description="API lấy nội dung tin tức sử dụng Newspaper4k",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc",
-    contact={
-        "name": "Nguyễn Ngọc Thiện",
-        "url": "https://www.youtube.com/@kalvinthiensocial",
-        "email": "contact@kalvinthien.dev"
-    }
+    redoc_url="/redoc"
 )
 
 # Security
@@ -722,13 +677,15 @@ class FeedRequest(BaseModel):
     url: HttpUrl = Field(..., description="URL của RSS feed")
     max_articles: Optional[int] = Field(20, description="Số lượng bài viết tối đa")
 
-# Authentication với token demo trong docs
+class MonitorRequest(BaseModel):
+    sources: List[HttpUrl] = Field(..., description="Danh sách URL nguồn tin")
+    keywords: Optional[List[str]] = Field(None, description="Từ khóa cần theo dõi")
+    check_interval: Optional[int] = Field(3600, description="Khoảng thời gian kiểm tra (giây)")
+
+# Authentication
 async def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_TOKEN:
-        raise HTTPException(
-            status_code=401, 
-            detail="Token không hợp lệ. Liên hệ Nguyễn Ngọc Thiện để lấy token."
-        )
+        raise HTTPException(status_code=401, detail="Token không hợp lệ")
     return credentials
 
 # Helper functions
@@ -778,12 +735,7 @@ def safe_extract_content(article_url: str, language: str = "vi") -> Dict:
             "source_url": article.source_url or None,
             "meta_description": article.meta_description or None,
             "meta_keywords": article.meta_keywords or [],
-            "tags": article.tags or [],
-            "api_info": {
-                "processed_by": "News API by Nguyễn Ngọc Thiện",
-                "youtube": "@kalvinthiensocial",
-                "processed_at": datetime.now().isoformat()
-            }
+            "tags": article.tags or []
         }
     except Exception as e:
         return {
@@ -791,54 +743,94 @@ def safe_extract_content(article_url: str, language: str = "vi") -> Dict:
             "url": article_url,
             "error": str(e),
             "title": None,
-            "text": None,
-            "api_info": {
-                "processed_by": "News API by Nguyễn Ngọc Thiện",
-                "youtube": "@kalvinthiensocial",
-                "error_at": datetime.now().isoformat()
+            "text": None
+        }
+
+async def extract_from_source(source_url: str, max_articles: int = 10) -> Dict:
+    try:
+        # Xây dựng nguồn tin
+        source = Source(source_url)
+        source.build()
+        
+        articles_data = []
+        processed = 0
+        
+        for article in source.articles[:max_articles]:
+            if processed >= max_articles:
+                break
+                
+            article_data = safe_extract_content(article.url)
+            if article_data["success"]:
+                articles_data.append(article_data)
+                processed += 1
+        
+        return {
+            "success": True,
+            "source_url": source_url,
+            "total_found": len(source.articles),
+            "processed": processed,
+            "articles": articles_data,
+            "categories": source.category_urls() if hasattr(source, 'category_urls') else []
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "source_url": source_url,
+            "error": str(e),
+            "articles": []
+        }
+
+def parse_rss_feed(feed_url: str, max_articles: int = 20) -> Dict:
+    try:
+        feed = feedparser.parse(feed_url)
+        articles = []
+        
+        for entry in feed.entries[:max_articles]:
+            article_data = {
+                "title": entry.get("title", ""),
+                "url": entry.get("link", ""),
+                "description": entry.get("description", ""),
+                "published": entry.get("published", ""),
+                "author": entry.get("author", ""),
+                "tags": [tag.term for tag in entry.get("tags", [])]
             }
+            articles.append(article_data)
+        
+        return {
+            "success": True,
+            "feed_url": feed_url,
+            "feed_title": feed.feed.get("title", ""),
+            "feed_description": feed.feed.get("description", ""),
+            "articles": articles,
+            "total_articles": len(articles)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "feed_url": feed_url,
+            "error": str(e),
+            "articles": []
         }
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
 async def home():
-    return f"""
+    return """
     <html>
         <head>
-            <title>📰 News Content API by Nguyễn Ngọc Thiện</title>
+            <title>📰 News Content API</title>
             <style>
-                body {{ font-family: 'Segoe UI', Arial, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; background: #f5f7fa; }}
-                .header {{ text-align: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 15px; margin-bottom: 30px; }}
-                .author-info {{ background: #ffffff; padding: 20px; border-radius: 10px; margin: 20px 0; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-                .api-info {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0; }}
-                .endpoint {{ background: #fff3e0; padding: 15px; margin: 15px 0; border-radius: 8px; border-left: 4px solid #ff9800; }}
-                .token-warning {{ background: #ffebee; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f44336; }}
-                code {{ background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-family: 'Courier New', monospace; }}
-                .btn {{ display: inline-block; padding: 12px 24px; background: #2196F3; color: white; text-decoration: none; border-radius: 6px; margin: 5px; }}
-                .btn:hover {{ background: #1976D2; }}
+                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                .header { text-align: center; color: #333; }
+                .api-info { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                .endpoint { background: #e3f2fd; padding: 10px; margin: 10px 0; border-radius: 5px; }
+                code { background: #f0f0f0; padding: 2px 5px; border-radius: 3px; }
             </style>
         </head>
         <body>
             <div class="header">
                 <h1>📰 News Content API</h1>
                 <p>API lấy nội dung tin tức sử dụng Newspaper4k</p>
-                <p>✨ Tác giả: <strong>Nguyễn Ngọc Thiện</strong></p>
-            </div>
-            
-            <div class="author-info">
-                <h3>👨‍💻 Thông tin tác giả</h3>
-                <p><strong>📺 YouTube:</strong> <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank">@kalvinthiensocial</a></p>
-                <p><strong>🎬 Playlist N8N:</strong> <a href="https://www.youtube.com/@kalvinthiensocial/playlists" target="_blank">Xem tại đây</a></p>
-                <p><strong>📱 Facebook:</strong> <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank">Ban.Thien.Handsome</a></p>
-                <p><strong>📞 Zalo/SĐT:</strong> 08.8888.4749</p>
-                <p><strong>🔔 Hãy đăng ký kênh YouTube để ủng hộ!</strong></p>
-            </div>
-            
-            <div class="token-warning">
-                <h3>🔐 Bảo mật Token</h3>
-                <p>Bearer Token thật đã được ẩn trong docs API để bảo mật.</p>
-                <p>Token demo hiển thị: <code>demo-token-for-docs-only</code></p>
-                <p>Liên hệ tác giả để lấy token thật nếu cần sử dụng API.</p>
             </div>
             
             <div class="api-info">
@@ -867,28 +859,25 @@ async def home():
                 <p>Phân tích RSS feed</p>
             </div>
             
-            <p style="text-align: center; margin-top: 30px;">
-                <a href="/docs" class="btn">📚 Xem API Documentation</a>
-                <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" class="btn" target="_blank">🔔 Đăng ký YouTube</a>
-            </p>
-            
-            <div style="text-align: center; margin-top: 30px; color: #666;">
-                <p>© 2024 News API by Nguyễn Ngọc Thiện • Made with ❤️ in Vietnam</p>
+            <div class="endpoint">
+                <h4>GET /docs</h4>
+                <p>Tài liệu API chi tiết (Swagger UI)</p>
             </div>
+            
+            <p style="text-align: center; margin-top: 30px;">
+                <a href="/docs">📚 Xem tài liệu API đầy đủ</a>
+            </p>
         </body>
     </html>
     """
 
 @app.get("/health")
-async def health_check():
+async def health_check(credentials: HTTPAuthorizationCredentials = Security(security)):
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "1.0.0",
-        "author": "Nguyễn Ngọc Thiện",
-        "youtube": "@kalvinthiensocial",
-        "contact": "Zalo: 08.8888.4749",
-        "features": ["article_extraction", "source_crawling", "rss_parsing"]
+        "features": ["article_extraction", "source_crawling", "rss_parsing", "content_monitoring"]
     }
 
 @app.post("/extract-article")
@@ -917,12 +906,53 @@ async def extract_article(
     
     return article_data
 
+@app.post("/extract-source")
+async def extract_source(
+    request: SourceRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
+):
+    """Lấy nhiều bài viết từ một trang tin tức"""
+    
+    source_data = await extract_from_source(
+        str(request.url),
+        request.max_articles
+    )
+    
+    if not source_data["success"]:
+        raise HTTPException(status_code=400, detail=f"Không thể lấy dữ liệu từ nguồn: {source_data.get('error')}")
+    
+    return source_data
+
+@app.post("/parse-feed")
+async def parse_feed(
+    request: FeedRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(verify_token)
+):
+    """Phân tích RSS feed"""
+    
+    feed_data = parse_rss_feed(str(request.url), request.max_articles)
+    
+    if not feed_data["success"]:
+        raise HTTPException(status_code=400, detail=f"Không thể phân tích feed: {feed_data.get('error')}")
+    
+    return feed_data
+
+@app.get("/stats")
+async def get_stats(credentials: HTTPAuthorizationCredentials = Depends(verify_token)):
+    """Thống kê sử dụng API"""
+    return {
+        "total_requests": "N/A",
+        "successful_extractions": "N/A", 
+        "failed_extractions": "N/A",
+        "uptime": "N/A",
+        "note": "Tính năng thống kê sẽ được bổ sung trong phiên bản sau"
+    }
+
 if __name__ == "__main__":
     import uvicorn
     print(f"🚀 Khởi động News Content API tại http://{API_HOST}:{API_PORT}")
     print(f"📚 Tài liệu API: http://{API_HOST}:{API_PORT}/docs")
-    print(f"👨‍💻 Tác giả: Nguyễn Ngọc Thiện")
-    print(f"📺 YouTube: @kalvinthiensocial")
+    print(f"🔑 Bearer Token: {API_TOKEN}")
     
     uvicorn.run(
         "main:app",
@@ -933,11 +963,25 @@ if __name__ == "__main__":
     )
 EOF
 
-    # Tạo systemd service cho News API
+    # Tạo script khởi động News API
+    cat << EOF > $N8N_DIR/news_api/start_news_api.sh
+#!/bin/bash
+
+# Cấu hình môi trường
+export NEWS_API_TOKEN="$NEWS_API_TOKEN"
+export NEWS_API_HOST="0.0.0.0"
+export NEWS_API_PORT="8001"
+
+# Khởi động News API
+cd "$N8N_DIR/news_api"
+source venv/bin/activate
+python main.py
+EOF
+
+    # Tạo service systemd cho News API
     cat << EOF > /etc/systemd/system/news-api.service
 [Unit]
-Description=News Content API Service by Nguyễn Ngọc Thiện
-Documentation=https://www.youtube.com/@kalvinthiensocial
+Description=News Content API Service
 After=network.target
 
 [Service]
@@ -950,43 +994,33 @@ Environment=NEWS_API_PORT=8001
 ExecStart=$N8N_DIR/news_api/venv/bin/python $N8N_DIR/news_api/main.py
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
     # Đặt quyền cho các file
+    chmod +x $N8N_DIR/news_api/start_news_api.sh
     chmod +x $N8N_DIR/news_api/main.py
     
     # Khởi động service
     systemctl daemon-reload
     systemctl enable news-api
-    
-    # Kiểm tra port 8001 có bị xung đột không
-    if netstat -tuln | grep -q ":8001\s"; then
-        echo "⚠️ Cổng 8001 đang được sử dụng. Dừng service cũ..."
-        systemctl stop news-api 2>/dev/null || true
-        sleep 2
-    fi
-    
     systemctl start news-api
     
-    # Đợi service khởi động
-    echo "⏳ Đợi News API khởi động..."
-    sleep 5
-    
-    # Kiểm tra status
-    if systemctl is-active --quiet news-api; then
-        echo "✅ News API đã khởi động thành công"
-    else
-        echo "❌ News API không khởi động được"
-        echo "📋 Kiểm tra logs: journalctl -u news-api -f"
-    fi
-    
-    echo "✅ News API setup hoàn tất"
-fi 
+    # Cập nhật Caddyfile để thêm subdomain api
+    cat << EOF > $N8N_DIR/Caddyfile
+${DOMAIN} {
+    reverse_proxy n8n:5678
+}
+
+api.${DOMAIN} {
+    reverse_proxy localhost:8001
+}
+EOF
+
+    echo "✅ News API đã được tạo và khởi động thành công"
+fi
 
 # Đặt quyền cho thư mục n8n
 echo "Đặt quyền cho thư mục n8n..."
@@ -998,18 +1032,34 @@ echo "Khởi động các container..."
 echo "Lưu ý: Quá trình build image có thể mất vài phút, vui lòng đợi..."
 cd $N8N_DIR
 
-# Kiểm tra cổng 80 chỉ trong domain mode
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    if netstat -tuln | grep -q ":80\s"; then
-        echo "CẢNH BÁO: Cổng 80 đang được sử dụng bởi một ứng dụng khác."
-    else
-        echo "Cổng 80 đang trống. Caddy sẽ sử dụng cổng 80 cho HTTP."
+# Kiểm tra cổng 80 có đang được sử dụng không
+if netstat -tuln | grep -q ":80\s"; then
+    echo "CẢNH BÁO: Cổng 80 đang được sử dụng bởi một ứng dụng khác. Caddy sẽ sử dụng cổng 8080."
+    # Đã cấu hình 8080 trong docker-compose.yml
+else
+    # Nếu cổng 80 trống, cập nhật docker-compose.yml để sử dụng cổng 80
+    sed -i 's/"8080:80"/"80:80"/g' $N8N_DIR/docker-compose.yml
+    echo "Cổng 80 đang trống. Caddy sẽ sử dụng cổng 80 mặc định."
+fi
+
+# Kiểm tra quyền truy cập Docker
+echo "Kiểm tra quyền truy cập Docker..."
+if ! docker ps &>/dev/null; then
+    echo "Khởi động container với sudo vì quyền truy cập Docker..."
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
     fi
 fi
 
-# Build và khởi động containers với docker compose
+# Build và khởi động containers với error handling
 echo "🔨 Bắt đầu build Docker image..."
-BUILD_OUTPUT=$(docker compose build 2>&1)
+BUILD_OUTPUT=$($DOCKER_COMPOSE_CMD build 2>&1)
 BUILD_EXIT_CODE=$?
 
 if [ $BUILD_EXIT_CODE -ne 0 ]; then
@@ -1026,7 +1076,7 @@ else
 fi
 
 echo "🚀 Khởi động containers..."
-START_OUTPUT=$(docker compose up -d --remove-orphans 2>&1)
+START_OUTPUT=$($DOCKER_COMPOSE_CMD up -d --remove-orphans 2>&1)
 START_EXIT_CODE=$?
 
 if [ $START_EXIT_CODE -ne 0 ]; then
@@ -1037,71 +1087,118 @@ else
     echo "✅ Containers đã được khởi động!"
 fi
 
-# Đợi containers khởi động hoàn toàn
+# Đợi lâu hơn để các container có thể khởi động hoàn toàn
 echo "⏳ Đợi containers khởi động hoàn toàn (30 giây)..."
 sleep 30
 
 # Kiểm tra các container đã chạy chưa
 echo "🔍 Kiểm tra trạng thái containers..."
 
+# Xác định lệnh docker phù hợp với quyền truy cập
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_CMD="docker"
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+fi
+
 # Kiểm tra container N8N
-N8N_RUNNING=$(docker ps --filter "name=n8n" --format "{{.Names}}" 2>/dev/null)
+N8N_RUNNING=$($DOCKER_CMD ps --filter "name=n8n" --format "{{.Names}}" 2>/dev/null)
 if [ -n "$N8N_RUNNING" ]; then
-    N8N_STATUS=$(docker ps --filter "name=n8n" --format "{{.Status}}" 2>/dev/null)
+    N8N_STATUS=$($DOCKER_CMD ps --filter "name=n8n" --format "{{.Status}}" 2>/dev/null)
     echo "✅ Container N8N: $N8N_RUNNING - $N8N_STATUS"
 else
     echo "❌ Container N8N: Không chạy hoặc lỗi khởi động"
     echo "📋 Kiểm tra logs N8N:"
-    echo "   docker compose logs n8n"
+    echo "   $DOCKER_COMPOSE_CMD logs n8n"
     echo ""
 fi
 
-# Kiểm tra container Caddy (chỉ trong domain mode)
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    CADDY_RUNNING=$(docker ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null)
-    if [ -n "$CADDY_RUNNING" ]; then
-        CADDY_STATUS=$(docker ps --filter "name=caddy" --format "{{.Status}}" 2>/dev/null)
-        echo "✅ Container Caddy: $CADDY_RUNNING - $CADDY_STATUS"
-    else
-        echo "❌ Container Caddy: Không chạy hoặc lỗi khởi động"
-        echo "📋 Kiểm tra logs Caddy:"
-        echo "   docker compose logs caddy"
-        echo ""
-    fi
+# Kiểm tra container Caddy
+CADDY_RUNNING=$($DOCKER_CMD ps --filter "name=caddy" --format "{{.Names}}" 2>/dev/null)
+if [ -n "$CADDY_RUNNING" ]; then
+    CADDY_STATUS=$($DOCKER_CMD ps --filter "name=caddy" --format "{{.Status}}" 2>/dev/null)
+    echo "✅ Container Caddy: $CADDY_RUNNING - $CADDY_STATUS"
+else
+    echo "❌ Container Caddy: Không chạy hoặc lỗi khởi động"
+    echo "📋 Kiểm tra logs Caddy:"
+    echo "   $DOCKER_COMPOSE_CMD logs caddy"
+    echo ""
+fi
+
+# Nếu có container không chạy, hiển thị thông tin troubleshooting
+if [ -z "$N8N_RUNNING" ] || [ -z "$CADDY_RUNNING" ]; then
+    echo "⚠️  Một hoặc nhiều container không chạy. Các bước khắc phục:"
+    echo "1. Kiểm tra logs: $DOCKER_COMPOSE_CMD logs"
+    echo "2. Restart containers: $DOCKER_COMPOSE_CMD restart"
+    echo "3. Rebuild từ đầu: $DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d --build"
+    echo ""
+fi
+
+# Hiển thị thông tin về cổng được sử dụng
+CADDY_PORT=$(grep -o '"[0-9]\+:80"' $N8N_DIR/docker-compose.yml | cut -d':' -f1 | tr -d '"')
+echo ""
+echo "Cấu hình cổng HTTP: $CADDY_PORT"
+if [ "$CADDY_PORT" = "8080" ]; then
+    echo "Sử dụng cổng 8080 cho HTTP thay vì cổng 80 mặc định (tránh xung đột)."
+    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN}:8080 hoặc https://${DOMAIN}"
+else
+    echo "Sử dụng cổng 80 mặc định cho HTTP."
+    echo "Bạn có thể truy cập bằng URL: http://${DOMAIN} hoặc https://${DOMAIN}"
 fi
 
 # Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n
 echo "Kiểm tra FFmpeg, yt-dlp và Puppeteer trong container n8n..."
 
-N8N_CONTAINER=$(docker ps -q --filter "name=n8n" 2>/dev/null)
+# Xác định lệnh docker phù hợp với quyền truy cập
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+else
+    DOCKER_CMD="docker"
+fi
+
+N8N_CONTAINER=$($DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
 if [ -n "$N8N_CONTAINER" ]; then
-    if docker exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
-        echo "✅ FFmpeg đã được cài đặt thành công trong container n8n."
+    if $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version &> /dev/null; then
+        echo "FFmpeg đã được cài đặt thành công trong container n8n."
+        echo "Phiên bản FFmpeg:"
+        $DOCKER_CMD exec $N8N_CONTAINER ffmpeg -version | head -n 1
     else
-        echo "⚠️ FFmpeg có thể chưa được cài đặt đúng cách trong container."
+        echo "Lưu ý: FFmpeg có thể chưa được cài đặt đúng cách trong container."
     fi
 
-    if docker exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
-        echo "✅ yt-dlp đã được cài đặt thành công trong container n8n."
+    if $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version &> /dev/null; then
+        echo "yt-dlp đã được cài đặt thành công trong container n8n."
+        echo "Phiên bản yt-dlp:"
+        $DOCKER_CMD exec $N8N_CONTAINER yt-dlp --version
     else
-        echo "⚠️ yt-dlp có thể chưa được cài đặt đúng cách trong container."
+        echo "Lưu ý: yt-dlp có thể chưa được cài đặt đúng cách trong container."
     fi
     
     # Kiểm tra trạng thái Puppeteer từ file status
-    PUPPETEER_STATUS=$(docker exec $N8N_CONTAINER cat /files/puppeteer_status.txt 2>/dev/null || echo "Puppeteer: UNKNOWN")
+    PUPPETEER_STATUS=$($DOCKER_CMD exec $N8N_CONTAINER cat /files/puppeteer_status.txt 2>/dev/null || echo "Puppeteer: UNKNOWN")
     
     if [[ "$PUPPETEER_STATUS" == *"AVAILABLE"* ]]; then
         echo "✅ Puppeteer/Chromium đã được cài đặt thành công trong container n8n."
+        echo "Phiên bản Chromium:"
+        $DOCKER_CMD exec $N8N_CONTAINER chromium-browser --version 2>/dev/null || echo "Lỗi lấy thông tin phiên bản"
     else
-        echo "⚠️ Puppeteer/Chromium cài đặt không thành công hoặc không khả dụng."
+        echo "⚠️  Lưu ý: Puppeteer/Chromium cài đặt không thành công hoặc không khả dụng."
         echo "   Các tính năng tự động hóa trình duyệt sẽ không hoạt động."
         echo "   Hệ thống vẫn hoạt động bình thường với các tính năng khác."
     fi
 else
-    echo "⚠️ Không thể kiểm tra công cụ ngay lúc này. Container n8n chưa sẵn sàng."
+    echo "Lưu ý: Không thể kiểm tra công cụ ngay lúc này. Container n8n chưa sẵn sàng."
 fi
 
-# Tạo script cập nhật tự động
+# Tạo script kiểm tra cập nhật tự động
 echo "Tạo script cập nhật tự động..."
 cat << EOF > $N8N_DIR/update-n8n.sh
 #!/bin/bash
@@ -1115,6 +1212,16 @@ log() {
 }
 
 log "Bắt đầu kiểm tra cập nhật..."
+
+# Kiểm tra Docker command
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    log "Không tìm thấy lệnh docker-compose hoặc docker compose."
+    exit 1
+fi
 
 # Cập nhật yt-dlp trên host
 log "Cập nhật yt-dlp trên host system..."
@@ -1156,12 +1263,12 @@ if [ "\$NEW_BASE_IMAGE_ID" != "\$OLD_BASE_IMAGE_ID" ]; then
     # Build lại image n8n-ffmpeg
     cd \$N8N_DIR
     log "Đang build lại image n8n-ffmpeg-latest..."
-    docker compose build
+    \$DOCKER_COMPOSE build
     
     # Khởi động lại container
     log "Khởi động lại container..."
-    docker compose down
-    docker compose up -d
+    \$DOCKER_COMPOSE down
+    \$DOCKER_COMPOSE up -d
     
     log "Cập nhật hoàn tất, phiên bản mới: \${NEW_BASE_IMAGE_ID}"
 else
@@ -1194,27 +1301,39 @@ echo "================================"
 N8N_DIR="$(dirname "$0")"
 cd "$N8N_DIR"
 
+# Xác định docker command
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+    DOCKER_COMPOSE_CMD="sudo docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    fi
+else
+    DOCKER_CMD="docker"
+    DOCKER_COMPOSE_CMD="docker-compose"
+    if ! command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+fi
+
 echo "1. Kiểm tra trạng thái containers..."
 echo "=================================="
-docker ps --filter "name=n8n" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+$DOCKER_CMD ps --filter "name=n8n" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 echo ""
 
 echo "2. Kiểm tra logs containers..."
 echo "============================="
 echo ">> N8N Logs (10 dòng cuối):"
-docker compose logs --tail=10 n8n 2>/dev/null || echo "Không thể lấy logs N8N"
+$DOCKER_COMPOSE_CMD logs --tail=10 n8n 2>/dev/null || echo "Không thể lấy logs N8N"
 echo ""
-
-if [ -f "Caddyfile" ]; then
-    echo ">> Caddy Logs (10 dòng cuối):"
-    docker compose logs --tail=10 caddy 2>/dev/null || echo "Không thể lấy logs Caddy"
-    echo ""
-fi
+echo ">> Caddy Logs (10 dòng cuối):"
+$DOCKER_COMPOSE_CMD logs --tail=10 caddy 2>/dev/null || echo "Không thể lấy logs Caddy"
+echo ""
 
 echo "3. Kiểm tra network connectivity..."
 echo "==================================="
 echo ">> Kiểm tra cổng 5678 (N8N internal):"
-docker exec $(docker ps -q --filter "name=n8n" | head -1) netstat -tuln | grep :5678 2>/dev/null || echo "N8N port không listening"
+$DOCKER_CMD exec $(docker ps -q --filter "name=n8n" | head -1) netstat -tuln | grep :5678 2>/dev/null || echo "N8N port không listening"
 echo ""
 
 echo "4. Kiểm tra disk space..."
@@ -1226,26 +1345,26 @@ echo ""
 echo "5. Các lệnh khắc phục thường dùng:"
 echo "================================="
 echo "• Restart containers:"
-echo "  docker compose restart"
+echo "  $DOCKER_COMPOSE_CMD restart"
 echo ""
 echo "• Rebuild containers:"
-echo "  docker compose down && docker compose up -d --build"
+echo "  $DOCKER_COMPOSE_CMD down && $DOCKER_COMPOSE_CMD up -d --build"
 echo ""
 echo "• Xem logs realtime:"
-echo "  docker compose logs -f"
+echo "  $DOCKER_COMPOSE_CMD logs -f"
 echo ""
 echo "• Kiểm tra resources:"
-echo "  docker stats --no-stream"
+echo "  $DOCKER_CMD stats --no-stream"
 echo ""
 
 read -p "Bạn có muốn restart containers ngay bây giờ? (y/n): " RESTART_CHOICE
 if [ "$RESTART_CHOICE" = "y" ] || [ "$RESTART_CHOICE" = "Y" ]; then
     echo "🔄 Đang restart containers..."
-    docker compose restart
+    $DOCKER_COMPOSE_CMD restart
     echo "✅ Hoàn tất restart. Đợi 30 giây để containers khởi động..."
     sleep 30
     echo "Trạng thái sau khi restart:"
-    docker ps --filter "name=n8n"
+    $DOCKER_CMD ps --filter "name=n8n"
 fi
 EOF
 
@@ -1272,9 +1391,15 @@ fi
 
 # Kiểm tra trạng thái Puppeteer
 PUPPETEER_INSTALL_STATUS="❌ Lỗi cài đặt"
-N8N_CONTAINER_CHECK=$(docker ps -q --filter "name=n8n" 2>/dev/null)
+if ! docker ps &>/dev/null; then
+    DOCKER_CMD="sudo docker"
+else
+    DOCKER_CMD="docker"
+fi
+
+N8N_CONTAINER_CHECK=$($DOCKER_CMD ps -q --filter "name=n8n" 2>/dev/null)
 if [ -n "$N8N_CONTAINER_CHECK" ]; then
-    PUPPETEER_STATUS_CHECK=$(docker exec $N8N_CONTAINER_CHECK cat /files/puppeteer_status.txt 2>/dev/null || echo "Puppeteer: UNKNOWN")
+    PUPPETEER_STATUS_CHECK=$($DOCKER_CMD exec $N8N_CONTAINER_CHECK cat /files/puppeteer_status.txt 2>/dev/null || echo "Puppeteer: UNKNOWN")
     if [[ "$PUPPETEER_STATUS_CHECK" == *"AVAILABLE"* ]]; then
         PUPPETEER_INSTALL_STATUS="✅ Khả dụng"
     else
@@ -1287,16 +1412,10 @@ echo "======================================================================"
 echo "🎉 N8N ĐÃ ĐƯỢC CÀI ĐẶT VÀ CẤU HÌNH THÀNH CÔNG!"
 echo "======================================================================"
 echo ""
-
-if [ "$DOMAIN_MODE" = "localhost" ]; then
-    echo "🏠 TRUY CẬP N8N (LOCALHOST MODE):"
-    echo "  - URL truy cập: http://localhost:5678"
-    echo "  - Không cần SSL, phù hợp cho: Development, WSL, testing"
-else
-    echo "🌐 TRUY CẬP N8N (DOMAIN MODE):"
-    echo "  - URL chính: https://${DOMAIN}"
-    echo "  - SSL: Tự động với Let's Encrypt"
-    echo "  - Phù hợp cho: Production, server VPS"
+echo "🌐 TRUY CẬP N8N:"
+echo "  - URL chính: https://${DOMAIN}"
+if [ "$CADDY_PORT" = "8080" ]; then
+    echo "  - URL phụ: http://${DOMAIN}:8080"
 fi
 echo ""
 
@@ -1313,12 +1432,7 @@ fi
 echo "📁 THÔNG TIN HỆ THỐNG:"
 echo "  - Thư mục cài đặt: $N8N_DIR"
 echo "  - Container runtime: Docker"
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    echo "  - Reverse proxy: Caddy (tự động SSL)"
-    echo "  - SSL: Let's Encrypt"
-else
-    echo "  - Chế độ: Localhost (không SSL)"
-fi
+echo "  - Reverse proxy: Caddy (tự động SSL)"
 echo ""
 
 echo "🔄 TÍNH NĂNG TỰ ĐỘNG CẬP NHẬT:"
@@ -1350,27 +1464,17 @@ fi
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "📰 NEWS CONTENT API:"
-    if [ "$DOMAIN_MODE" = "domain" ]; then
-        echo "  - URL API: https://api.${DOMAIN}"
-        echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
-    else
-        echo "  - URL API: http://localhost:8001"
-        echo "  - Docs/Testing: http://localhost:8001/docs"
-    fi
-    echo "  - Bearer Token: ********** (ẩn để bảo mật)"
-    echo "  - Token được lưu trong env vars"
+    echo "  - URL API: https://api.${DOMAIN}"
+    echo "  - Docs/Testing: https://api.${DOMAIN}/docs"
+    echo "  - Bearer Token: $NEWS_API_TOKEN"
     echo "  - Trạng thái: $NEWS_API_STATUS"
     echo "  - Chức năng: Lấy nội dung tin tức với Newspaper4k"
     echo ""
     echo "  📋 CÁCH SỬ DỤNG NEWS API TRONG N8N:"
     echo "  1. Tạo HTTP Request node trong workflow"
     echo "  2. Method: POST"
-    if [ "$DOMAIN_MODE" = "domain" ]; then
-        echo "  3. URL: https://api.${DOMAIN}/extract-article"
-    else
-        echo "  3. URL: http://localhost:8001/extract-article"
-    fi
-    echo "  4. Headers: Authorization: Bearer [TOKEN_ĐƯỢC_CẤU_HÌNH]"
+    echo "  3. URL: https://api.${DOMAIN}/extract-article"
+    echo "  4. Headers: Authorization: Bearer $NEWS_API_TOKEN"
     echo "  5. Body: {\"url\": \"https://example.com/news-article\"}"
     echo ""
 fi
@@ -1385,11 +1489,11 @@ echo ""
 
 echo "🛠️ LỆNH QUẢN LÝ HỆ THỐNG:"
 echo "  - 🔧 Khắc phục sự cố: $N8N_DIR/troubleshoot.sh"
-echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker compose logs -f n8n"
-echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker compose restart"
+echo "  - 📋 Xem logs N8N: cd $N8N_DIR && docker-compose logs -f n8n"
+echo "  - 🔄 Restart N8N: cd $N8N_DIR && docker-compose restart"
 echo "  - 💾 Backup thủ công: $N8N_DIR/backup-workflows.sh"
 echo "  - 🔄 Cập nhật thủ công: $N8N_DIR/update-n8n.sh"
-echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker compose down && docker compose up -d --build"
+echo "  - 🏗️  Rebuild containers: cd $N8N_DIR && docker-compose down && docker-compose up -d --build"
 
 if [ "$SETUP_NEWS_API" = "y" ]; then
     echo "  - 🔄 Restart News API: systemctl restart news-api"
@@ -1421,11 +1525,7 @@ echo "  - Đổi mật khẩu đăng nhập N8N sau khi truy cập lần đầu"
 echo "  - Backup định kỳ các workflow quan trọng"
 echo "  - Giám sát logs hệ thống thường xuyên"
 if [ "$SETUP_NEWS_API" = "y" ]; then
-    echo "  - Bearer Token được ẩn và lưu trong system environment"
-fi
-if [ "$DOMAIN_MODE" = "domain" ]; then
-    echo "  - Đảm bảo domain được cấu hình DNS đúng"
-    echo "  - SSL certificate sẽ tự động gia hạn"
+    echo "  - Giữ bí mật Bearer Token của News API: $NEWS_API_TOKEN"
 fi
 
 # Thông báo đặc biệt về Puppeteer nếu không khả dụng
@@ -1439,29 +1539,17 @@ if [[ "$PUPPETEER_INSTALL_STATUS" == *"Không khả dụng"* ]] || [[ "$PUPPETEE
 fi
 echo ""
 
-if [ "$DOMAIN_MODE" = "localhost" ]; then
-    echo "⏱️  LƯU Ý LOCALHOST MODE:"
-    echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
-    echo "  - Truy cập qua http://localhost:5678"
-    echo "  - Phù hợp cho development và testing"
-    echo "  - Để chuyển sang domain mode, chạy lại script mà không dùng --localhost"
-else
-    echo "⏱️  LƯU Ý DOMAIN MODE:"
-    echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
-    echo "  - SSL certificate tự động có thể mất 5-10 phút để cấu hình"
-    echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
-    echo "  - Để chuyển sang localhost mode, chạy lại script với --localhost"
-fi
+echo "⏱️  LƯU Ý KHỞI ĐỘNG:"
+echo "  - N8N có thể cần 2-3 phút để khởi động hoàn toàn"
+echo "  - SSL certificate tự động có thể mất 5-10 phút để cấu hình"
+echo "  - Nếu không truy cập được, hãy kiểm tra logs và DNS"
 echo ""
 
 echo "👨‍💻 THÔNG TIN TÁC GIẢ:"
-echo "  - Tác giả: Nguyễn Ngọc Thiện"
-echo "  - 📺 YouTube: https://www.youtube.com/@kalvinthiensocial"
-echo "  - 🎬 Playlist N8N: https://www.youtube.com/@kalvinthiensocial/playlists"
-echo "  - 📱 Facebook: https://www.facebook.com/Ban.Thien.Handsome/"
-echo "  - 📞 Zalo/SĐT: 08.8888.4749"
-echo "  - 🔔 Hãy đăng ký kênh YouTube để ủng hộ tác giả!"
+echo "  - Script gốc: Nguyễn Ngọc Thiện"
+echo "  - YouTube: @EtoolsAICONTENT"
+echo "  - Phiên bản cải tiến: Tích hợp News API + Telegram Backup"
 echo ""
 echo "======================================================================"
 echo "🎯 CÀI ĐẶT HOÀN TẤT! CHÚC BẠN SỬ DỤNG N8N HIỆU QUẢ!"
-echo "======================================================================" 
+echo "======================================================================"
