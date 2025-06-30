@@ -8,13 +8,15 @@
 # Zalo: 08.8888.4749
 # Cập nhật: 30/06/2025
 #
-# ✨ TÍNH NĂNG MỚI TRONG V4 (Bản sửa lỗi cuối cùng):
-#   - ✅ GUARANTEED: Đảm bảo quá trình kiểm tra SSL luôn được thực thi sau khi deploy.
+# ✨ TÍNH NĂNG MỚI
+
 #   - ☁️ Tích hợp Backup & Restore qua Google Drive (rclone).
 #   - 🔄 Tùy chọn Restore dữ liệu ngay khi bắt đầu cài đặt (từ local hoặc G-Drive).
+#   - 🔑 Gỡ bỏ hoàn toàn giới hạn Bearer Token (độ dài, ký tự đặc biệt).
 
 # =============================================================================
 
+# set -e
 set -e
 
 # Colors for output
@@ -1975,4 +1977,338 @@ else:
         echo -e "  • Domain này đã đạt giới hạn miễn phí"
         echo ""
         echo -e "${YELLOW}📅 THÔNG TIN RATE LIMIT:${NC}"
-        echo -e "  • Rate limit sẽ được reset vào khoảng: ${WHITE}$reset_time_vn${N
+        echo -e "  • Rate limit sẽ được reset vào khoảng: ${WHITE}$reset_time_vn${NC}"
+        echo ""
+        
+        echo -e "${YELLOW}💡 GIẢI PHÁP:${NC}"
+        echo -e "  ${GREEN}1. SỬ DỤNG STAGING SSL (TẠM THỜI):${NC}"
+        echo -e "     • Website sẽ hiển thị 'Not Secure' nhưng vẫn hoạt động"
+        echo -e "     • Có thể chuyển về production SSL sau khi rate limit reset"
+        echo ""
+        echo -e "  ${GREEN}2. ĐỢI ĐẾN KHI RATE LIMIT RESET:${NC}"
+        echo -e "     • Đợi đến sau thời gian ở trên và chạy lại script"
+        echo ""
+        
+        echo -e "${YELLOW}📋 LỊCH SỬ SSL ATTEMPTS GẦN ĐÂY:${NC}"
+        echo "$caddy_logs" | grep -i "certificate\|ssl\|acme\|rate" | tail -10 | while read line; do
+            echo -e "  ${WHITE}• $line${NC}"
+        done
+        echo ""
+        
+        read -p "🤔 Bạn muốn tiếp tục với Staging SSL? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            setup_staging_ssl
+        else
+            exit 1
+        fi
+    else
+        warning "⚠️ SSL có thể chưa sẵn sàng hoặc đã xảy ra lỗi khác."
+        echo -e "${YELLOW}Vui lòng kiểm tra log của Caddy để biết chi tiết:${NC}"
+        $DOCKER_COMPOSE logs caddy
+    fi
+}
+
+setup_staging_ssl() {
+    warning "🔧 Thiết lập Staging SSL..."
+    
+    # Stop containers
+    $DOCKER_COMPOSE down
+    
+    # Remove SSL volumes to force re-issuance
+    local project_name=$(basename "$INSTALL_DIR")
+    docker volume rm ${project_name}_caddy_data ${project_name}_caddy_config 2>/dev/null || true
+    
+    # Update Caddyfile for staging
+    sed -i '/acme_ca/c\    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory' "$INSTALL_DIR/Caddyfile"
+    
+    # Restart containers
+    $DOCKER_COMPOSE up -d
+    
+    success "✅ Đã thiết lập Staging SSL"
+    warning "⚠️ Website sẽ hiển thị 'Not Secure' - đây là bình thường với staging certificate"
+}
+
+# =============================================================================
+# TROUBLESHOOTING SCRIPT
+# =============================================================================
+
+create_troubleshooting_script() {
+    log "🔧 Tạo script chẩn đoán..."
+    
+    cat > "$INSTALL_DIR/troubleshoot.sh" << 'EOF'
+#!/bin/bash
+
+# =============================================================================
+# N8N TROUBLESHOOTING SCRIPT
+# =============================================================================
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m'
+
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${WHITE}                    🔧 N8N TROUBLESHOOTING SCRIPT                            ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Check Docker Compose command
+if command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE="docker-compose"
+elif docker compose version &> /dev/null; then
+    DOCKER_COMPOSE="docker compose"
+else
+    echo -e "${RED}❌ Docker Compose không tìm thấy!${NC}"
+    exit 1
+fi
+
+cd /home/n8n
+
+echo -e "${BLUE}📍 1. System Information:${NC}"
+echo "• OS: $(lsb_release -d | cut -f2)"
+echo "• Kernel: $(uname -r)"
+echo "• Docker: $(docker --version)"
+echo "• Docker Compose: $($DOCKER_COMPOSE --version)"
+echo "• Disk Usage: $(df -h /home/n8n | tail -1 | awk '{print $5}')"
+echo "• Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+echo "• Uptime: $(uptime -p)"
+echo ""
+
+echo -e "${BLUE}📍 2. Installation Mode:${NC}"
+if [[ -f "Caddyfile" ]]; then
+    echo "• Mode: Production Mode (with SSL)"
+    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
+    echo "• Domain: $DOMAIN"
+else
+    echo "• Mode: Local Mode"
+    echo "• Access: http://localhost:5678"
+fi
+echo ""
+
+echo -e "${BLUE}📍 3. Container Status:${NC}"
+$DOCKER_COMPOSE ps
+echo ""
+
+echo -e "${BLUE}📍 4. Docker Images:${NC}"
+docker images | grep -E "(n8n|caddy|news-api)"
+echo ""
+
+echo -e "${BLUE}📍 5. Network Status:${NC}"
+echo "• Port 80: $(netstat -tulpn 2>/dev/null | grep :80 | wc -l) connections"
+echo "• Port 443: $(netstat -tulpn 2>/dev/null | grep :443 | wc -l) connections"
+echo "• Port 5678: $(netstat -tulpn 2>/dev/null | grep :5678 | wc -l) connections"
+echo "• Port 8000: $(netstat -tulpn 2>/dev/null | grep :8000 | wc -l) connections"
+echo "• Docker Networks:"
+docker network ls | grep n8n
+echo ""
+
+if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
+    echo -e "${BLUE}📍 6. SSL Certificate Status:${NC}"
+    echo "• Domain: $DOMAIN"
+    echo "• DNS Resolution: $(dig +short $DOMAIN A | tail -1)"
+    echo "• SSL Test:"
+    timeout 10 curl -I https://$DOMAIN 2>/dev/null | head -3 || echo "  SSL not ready"
+    echo ""
+fi
+
+echo -e "${BLUE}📍 7. File Permissions:${NC}"
+echo "• N8N data directory: $(ls -ld /home/n8n/files | awk '{print $1" "$3":"$4}')"
+echo "• Database file: $(ls -l /home/n8n/files/database.sqlite 2>/dev/null | awk '{print $1" "$3":"$4}' || echo 'Not found')"
+echo ""
+
+echo -e "${BLUE}📍 8. Recent Logs (last 20 lines):${NC}"
+echo -e "${YELLOW}N8N Logs:${NC}"
+$DOCKER_COMPOSE logs --tail=20 n8n 2>/dev/null || echo "No N8N logs"
+echo ""
+
+if docker ps | grep -q "caddy-proxy"; then
+    echo -e "${YELLOW}Caddy Logs:${NC}"
+    $DOCKER_COMPOSE logs --tail=20 caddy 2>/dev/null || echo "No Caddy logs"
+    echo ""
+fi
+
+if docker ps | grep -q "news-api"; then
+    echo -e "${YELLOW}News API Logs:${NC}"
+    $DOCKER_COMPOSE logs --tail=20 fastapi 2>/dev/null || echo "No News API logs"
+    echo ""
+fi
+
+echo -e "${BLUE}📍 9. Backup Status:${NC}"
+if [[ -d "/home/n8n/files/backup_full" ]]; then
+    BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
+    echo "• Backup files: $BACKUP_COUNT"
+    if [[ $BACKUP_COUNT -gt 0 ]]; then
+        echo "• Latest backup: $(ls -t /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | xargs basename)"
+        echo "• Latest backup size: $(ls -lh /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | awk '{print $5}')"
+    fi
+else
+    echo "• No backup directory found"
+fi
+echo ""
+
+echo -e "${BLUE}📍 10. Cron Jobs:${NC}"
+crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
+echo ""
+
+echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
+echo -e "${YELLOW}• Fix permissions:${NC} chown -R 1000:1000 /home/n8n/files/"
+echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE restart"
+echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
+echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
+echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
+
+if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
+    echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
+fi
+
+echo ""
+echo -e "${CYAN}✅ Troubleshooting completed!${NC}"
+EOF
+
+    chmod +x "$INSTALL_DIR/troubleshoot.sh"
+    
+    success "Đã tạo script chẩn đoán"
+}
+
+# =============================================================================
+# FINAL SUMMARY
+# =============================================================================
+
+show_final_summary() {
+    clear
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║${WHITE}                    🎉 N8N ĐÃ ĐƯỢC CÀI ĐẶT THÀNH CÔNG!                      ${GREEN}║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    echo -e "${CYAN}🌐 TRUY CẬP DỊCH VỤ:${NC}"
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        echo -e "  • N8N: ${WHITE}http://localhost:5678${NC}"
+        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+            echo -e "  • News API: ${WHITE}http://localhost:8000${NC}"
+            echo -e "  • API Docs: ${WHITE}http://localhost:8000/docs${NC}"
+        fi
+    else
+        echo -e "  • N8N: ${WHITE}https://${DOMAIN}${NC}"
+        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+            echo -e "  • News API: ${WHITE}https://${API_DOMAIN}${NC}"
+            echo -e "  • API Docs: ${WHITE}https://${API_DOMAIN}/docs${NC}"
+        fi
+    fi
+    
+    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+        echo -e "  • Bearer Token: ${YELLOW}Đã được đặt (không hiển thị vì bảo mật)${NC}"
+    fi
+    
+    echo ""
+    echo -e "${CYAN}📁 THÔNG TIN HỆ THỐNG:${NC}"
+    echo -e "  • Chế độ: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")${NC}"
+    echo -e "  • Thư mục cài đặt: ${WHITE}${INSTALL_DIR}${NC}"
+    echo -e "  • Script chẩn đoán: ${WHITE}${INSTALL_DIR}/troubleshoot.sh${NC}"
+    echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
+    echo ""
+    
+    echo -e "${CYAN}💾 CẤU HÌNH BACKUP:${NC}"
+    echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
+    echo -e "  • Google Drive backup: ${WHITE}$([[ "$ENABLE_GDRIVE_BACKUP" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
+    if [[ "$LOCAL_MODE" != "true" ]]; then
+        echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
+    fi
+    echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
+    echo ""
+    
+    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+        echo -e "${CYAN}🔧 ĐỔI BEARER TOKEN:${NC}"
+        echo -e "  ${WHITE}cd /home/n8n && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=\"NEW_TOKEN\"/' docker-compose.yml && $DOCKER_COMPOSE restart fastapi${NC}"
+        echo ""
+    fi
+    
+    echo -e "${CYAN}🚀 TÁC GIẢ:${NC}"
+    echo -e "  • Tên: ${WHITE}Nguyễn Ngọc Thiện${NC}"
+    echo -e "  • YouTube: ${WHITE}https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1${NC}"
+    echo -e "  • Zalo: ${WHITE}08.8888.4749${NC}"
+    echo -e "  • Cập nhật: ${WHITE}30/06/2025${NC}"
+    echo ""
+    
+    echo -e "${YELLOW}🎬 ĐĂNG KÝ KÊNH YOUTUBE ĐỂ ỦNG HỘ MÌNH NHÉ! 🔔${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+}
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+main() {
+    # Parse arguments
+    parse_arguments "$@"
+    
+    # Show banner
+    show_banner
+    
+    # System checks
+    check_root
+    check_os
+    detect_environment
+    check_docker_compose
+    
+    # Setup swap
+    setup_swap
+    
+    # Get user input
+    get_restore_option
+    get_installation_mode
+    get_domain_input
+    get_cleanup_option
+    get_news_api_config
+    get_backup_config
+    get_auto_update_config
+    
+    # Verify DNS (skip for local mode)
+    verify_dns
+    
+    # Cleanup old installation
+    cleanup_old_installation
+    
+    # Install Docker
+    install_docker
+    
+    # Create project structure
+    create_project_structure
+    
+    # Perform restore if requested
+    perform_restore
+    
+    # Create configuration files
+    create_dockerfile
+    create_news_api
+    create_docker_compose
+    create_caddyfile
+    
+    # Create scripts
+    create_backup_scripts
+    create_update_script
+    create_troubleshooting_script
+    
+    # Setup Backup Configs
+    setup_backup_configs
+    
+    # Setup cron jobs (skip for local mode)
+    setup_cron_jobs
+    
+    # Build and deploy
+    build_and_deploy
+    
+    # Check SSL and rate limits (skip for local mode)
+    check_ssl_rate_limit
+    
+    # Show final summary
+    show_final_summary
+}
+
+# Run main function
+main "$@"
