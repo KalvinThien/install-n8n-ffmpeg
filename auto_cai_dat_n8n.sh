@@ -28,17 +28,17 @@ API_DOMAIN=""
 BEARER_TOKEN=""
 TELEGRAM_BOT_TOKEN=""
 TELEGRAM_CHAT_ID=""
+GDRIVE_CLIENT_ID=""
+GDRIVE_CLIENT_SECRET=""
 ENABLE_NEWS_API=false
 ENABLE_TELEGRAM=false
+ENABLE_GDRIVE=false
 ENABLE_AUTO_UPDATE=false
-ENABLE_GDRIVE_BACKUP=false
-ENABLE_RESTORE=false
-RESTORE_SOURCE=""
-RESTORE_FILE=""
-GDRIVE_FOLDER_ID=""
 CLEAN_INSTALL=false
 SKIP_DOCKER=false
 LOCAL_MODE=false
+RESTORE_MODE=false
+RESTORE_FILE=""
 
 # =============================================================================
 # UTILITY FUNCTIONS
@@ -49,14 +49,14 @@ show_banner() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${WHITE}                    🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 🚀                    ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram Backup        ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram + GDrive       ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔒 SSL Certificate tự động với Caddy                                      ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 📰 News Content API với FastAPI + Newspaper4k                            ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 📱 Telegram Backup tự động hàng ngày                                     ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE} ☁️  Google Drive Backup với OAuth2                                       ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} ☁️ Google Drive Backup với OAuth2                                        ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} 📦 Complete Restore System                                               ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔄 Auto-Update với tùy chọn                                              ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE} 🏠 Local Mode cho development                                            ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE} 📦 Restore System từ backup                                             ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} 🏠 Local Mode (không cần domain)                                         ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${YELLOW} 👨‍💻 Tác giả: Nguyễn Ngọc Thiện                                           ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW} 📺 YouTube: https://www.youtube.com/@kalvinthiensocial                  ${CYAN}║${NC}"
@@ -95,19 +95,18 @@ show_help() {
     echo "Sử dụng: $0 [OPTIONS]"
     echo ""
     echo "OPTIONS:"
-    echo "  -h, --help          Hiển thị trợ giúp này"
-    echo "  -d, --dir DIR       Thư mục cài đặt (mặc định: /home/n8n)"
-    echo "  -c, --clean         Xóa cài đặt cũ trước khi cài mới"
-    echo "  -s, --skip-docker   Bỏ qua cài đặt Docker (nếu đã có)"
-    echo "  -l, --local         Cài đặt Local Mode (không cần domain)"
-    echo "  -r, --restore FILE  Restore từ file backup"
+    echo "  -h, --help              Hiển thị trợ giúp này"
+    echo "  -d, --dir DIR           Thư mục cài đặt (mặc định: /home/n8n)"
+    echo "  -c, --clean             Xóa cài đặt cũ trước khi cài mới"
+    echo "  -s, --skip-docker       Bỏ qua cài đặt Docker (nếu đã có)"
+    echo "  -l, --local             Cài đặt Local Mode (không cần domain)"
+    echo "  -r, --restore FILE      Restore từ file backup"
     echo ""
     echo "Ví dụ:"
-    echo "  $0                          # Cài đặt bình thường"
-    echo "  $0 --clean                 # Xóa cài đặt cũ và cài mới"
-    echo "  $0 --local                 # Cài đặt Local Mode"
-    echo "  $0 -d /opt/n8n             # Cài đặt vào thư mục /opt/n8n"
-    echo "  $0 --restore backup.tar.gz # Restore từ file backup"
+    echo "  $0                      # Cài đặt bình thường"
+    echo "  $0 --clean             # Xóa cài đặt cũ và cài mới"
+    echo "  $0 --local             # Cài đặt Local Mode"
+    echo "  $0 --restore backup.tar.gz  # Restore từ file"
     echo ""
 }
 
@@ -135,7 +134,7 @@ parse_arguments() {
                 shift
                 ;;
             -r|--restore)
-                ENABLE_RESTORE=true
+                RESTORE_MODE=true
                 RESTORE_FILE="$2"
                 shift 2
                 ;;
@@ -247,28 +246,37 @@ get_installation_mode() {
         return 0
     fi
     
+    echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}                        🏠 CHỌN CHẾĐỘ CÀI ĐẶT                               ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}                        🏠 CHỌN CHẾ ĐỘ CÀI ĐẶT                              ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${WHITE}Chọn chế độ cài đặt:${NC}"
-    echo -e "  ${GREEN}1. Production Mode:${NC} Cài đặt với domain, SSL, reverse proxy"
-    echo -e "  ${BLUE}2. Local Mode:${NC} Cài đặt local cho development (localhost)"
+    echo -e "  ${GREEN}1. Domain Mode${NC} - Cài đặt với domain và SSL certificate"
+    echo -e "  ${GREEN}2. Local Mode${NC} - Cài đặt local (localhost) không cần domain"
     echo ""
     
-    read -p "🏠 Bạn muốn cài đặt Local Mode? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        LOCAL_MODE=true
-        info "Đã chọn Local Mode"
-    else
-        LOCAL_MODE=false
-        info "Đã chọn Production Mode"
-    fi
+    while true; do
+        read -p "🏠 Chọn chế độ cài đặt (1/2): " mode_choice
+        case $mode_choice in
+            1)
+                LOCAL_MODE=false
+                break
+                ;;
+            2)
+                LOCAL_MODE=true
+                info "Đã chọn Local Mode - không cần domain"
+                break
+                ;;
+            *)
+                error "Vui lòng chọn 1 hoặc 2"
+                ;;
+        esac
+    done
 }
 
 get_restore_option() {
-    if [[ "$ENABLE_RESTORE" == "true" ]]; then
+    if [[ "$RESTORE_MODE" == "true" ]]; then
         return 0
     fi
     
@@ -277,75 +285,42 @@ get_restore_option() {
     echo -e "${CYAN}║${WHITE}                        📦 RESTORE OPTION                                   ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "${WHITE}Bạn có muốn restore từ backup cũ?${NC}"
-    echo -e "  📁 Restore từ file .tar.gz local"
-    echo -e "  ☁️  Restore từ Google Drive"
-    echo -e "  ❌ Không restore (cài đặt mới)"
-    echo ""
     
-    read -p "📦 Bạn có muốn restore từ backup? (y/N): " -n 1 -r
+    read -p "📦 Bạn có muốn restore từ backup cũ? (y/N): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        ENABLE_RESTORE=true
-        get_restore_source
+        RESTORE_MODE=true
+        
+        echo ""
+        echo -e "${WHITE}Chọn nguồn restore:${NC}"
+        echo -e "  ${GREEN}1. File local${NC} - Restore từ file .tar.gz"
+        echo -e "  ${GREEN}2. Google Drive${NC} - Restore từ Google Drive"
+        echo ""
+        
+        while true; do
+            read -p "📦 Chọn nguồn restore (1/2): " restore_choice
+            case $restore_choice in
+                1)
+                    while true; do
+                        read -p "📁 Nhập đường dẫn file backup (.tar.gz): " RESTORE_FILE
+                        if [[ -f "$RESTORE_FILE" && "$RESTORE_FILE" == *.tar.gz ]]; then
+                            break
+                        else
+                            error "File không tồn tại hoặc không phải .tar.gz"
+                        fi
+                    done
+                    break
+                    ;;
+                2)
+                    RESTORE_FILE="gdrive"
+                    break
+                    ;;
+                *)
+                    error "Vui lòng chọn 1 hoặc 2"
+                    ;;
+            esac
+        done
     fi
-}
-
-get_restore_source() {
-    echo ""
-    echo -e "${YELLOW}📦 Chọn nguồn restore:${NC}"
-    echo -e "  ${GREEN}1.${NC} File local (.tar.gz)"
-    echo -e "  ${GREEN}2.${NC} Google Drive"
-    echo ""
-    
-    while true; do
-        read -p "Chọn (1-2): " choice
-        case $choice in
-            1)
-                RESTORE_SOURCE="local"
-                get_local_restore_file
-                break
-                ;;
-            2)
-                RESTORE_SOURCE="gdrive"
-                get_gdrive_restore_config
-                break
-                ;;
-            *)
-                error "Lựa chọn không hợp lệ. Vui lòng chọn 1 hoặc 2."
-                ;;
-        esac
-    done
-}
-
-get_local_restore_file() {
-    echo ""
-    while true; do
-        read -p "📁 Nhập đường dẫn file backup (.tar.gz): " RESTORE_FILE
-        if [[ -f "$RESTORE_FILE" && "$RESTORE_FILE" == *.tar.gz ]]; then
-            success "File backup hợp lệ: $RESTORE_FILE"
-            break
-        else
-            error "File không tồn tại hoặc không phải .tar.gz. Vui lòng nhập lại."
-        fi
-    done
-}
-
-get_gdrive_restore_config() {
-    echo ""
-    echo -e "${YELLOW}☁️  Restore từ Google Drive:${NC}"
-    echo -e "  • Cần có rclone đã cấu hình với Google Drive"
-    echo -e "  • File backup phải có trong Google Drive"
-    echo ""
-    
-    while true; do
-        read -p "📁 Nhập tên file backup trên Google Drive: " RESTORE_FILE
-        if [[ -n "$RESTORE_FILE" ]]; then
-            break
-        else
-            error "Tên file không được để trống."
-        fi
-    done
 }
 
 get_domain_input() {
@@ -419,13 +394,13 @@ get_news_api_config() {
     
     echo ""
     echo -e "${YELLOW}🔐 Thiết lập Bearer Token cho News API:${NC}"
+    echo -e "  • Token phải có ít nhất 8 ký tự"
     echo -e "  • Có thể chứa chữ cái, số và ký tự đặc biệt"
-    echo -e "  • Độ dài tùy ý (khuyến nghị ít nhất 16 ký tự)"
     echo -e "  • Sẽ được sử dụng để xác thực API calls"
     echo ""
     
     while true; do
-        read -p "🔑 Nhập Bearer Token: " BEARER_TOKEN
+        read -p "🔑 Nhập Bearer Token (ít nhất 8 ký tự): " BEARER_TOKEN
         if [[ ${#BEARER_TOKEN} -ge 8 ]]; then
             break
         else
@@ -437,11 +412,6 @@ get_news_api_config() {
 }
 
 get_telegram_config() {
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        ENABLE_TELEGRAM=false
-        return 0
-    fi
-    
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${WHITE}                        📱 TELEGRAM BACKUP                                  ${CYAN}║${NC}"
@@ -499,41 +469,71 @@ get_telegram_config() {
 }
 
 get_gdrive_config() {
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        ENABLE_GDRIVE_BACKUP=false
-        return 0
-    fi
-    
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${WHITE}                        ☁️  GOOGLE DRIVE BACKUP                             ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${WHITE}Google Drive Backup cho phép:${NC}"
-    echo -e "  ☁️  Tự động backup lên Google Drive mỗi ngày"
-    echo -e "  🔐 Xác thực OAuth2 an toàn"
+    echo -e "  ☁️ Tự động upload backup lên Google Drive mỗi ngày"
+    echo -e "  🔒 Xác thực OAuth2 an toàn"
     echo -e "  📁 Tự động tạo thư mục N8N_Backups"
     echo -e "  🗂️ Giữ 30 bản backup gần nhất"
-    echo -e "  📊 Thông báo trạng thái qua Telegram"
+    echo -e "  📦 Restore interactive từ Google Drive"
     echo ""
     
-    read -p "☁️  Bạn có muốn thiết lập Google Drive Backup? (Y/n): " -n 1 -r
+    read -p "☁️ Bạn có muốn thiết lập Google Drive Backup? (Y/n): " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Nn]$ ]]; then
-        ENABLE_GDRIVE_BACKUP=false
+        ENABLE_GDRIVE=false
         return 0
     fi
     
-    ENABLE_GDRIVE_BACKUP=true
-    success "Đã bật Google Drive Backup"
+    ENABLE_GDRIVE=true
+    
+    echo ""
+    echo -e "${YELLOW}🔧 Hướng dẫn thiết lập Google Drive API:${NC}"
+    echo ""
+    echo -e "${WHITE}Bước 1: Google Cloud Console${NC}"
+    echo -e "  1. Truy cập: ${BLUE}https://console.cloud.google.com/${NC}"
+    echo -e "  2. Tạo project mới hoặc chọn project có sẵn"
+    echo -e "  3. Enable Google Drive API:"
+    echo -e "     • APIs & Services → Library"
+    echo -e "     • Tìm 'Google Drive API' → Enable"
+    echo ""
+    echo -e "${WHITE}Bước 2: Tạo OAuth2 Credentials${NC}"
+    echo -e "  1. APIs & Services → Credentials"
+    echo -e "  2. Create Credentials → OAuth client ID"
+    echo -e "  3. Application type: Desktop application"
+    echo -e "  4. Name: N8N Backup (hoặc tên bất kỳ)"
+    echo -e "  5. Download JSON file hoặc copy Client ID & Secret"
+    echo ""
+    
+    echo -e "${YELLOW}📋 Nhập thông tin OAuth2:${NC}"
+    echo ""
+    
+    while true; do
+        read -p "🔑 Client ID: " GDRIVE_CLIENT_ID
+        if [[ -n "$GDRIVE_CLIENT_ID" ]]; then
+            break
+        else
+            error "Client ID không được để trống"
+        fi
+    done
+    
+    while true; do
+        read -p "🔐 Client Secret: " GDRIVE_CLIENT_SECRET
+        if [[ -n "$GDRIVE_CLIENT_SECRET" ]]; then
+            break
+        else
+            error "Client Secret không được để trống"
+        fi
+    done
+    
+    success "Đã thiết lập Google Drive OAuth2"
 }
 
 get_auto_update_config() {
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        ENABLE_AUTO_UPDATE=false
-        return 0
-    fi
-    
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${WHITE}                        🔄 AUTO-UPDATE                                      ${CYAN}║${NC}"
@@ -692,79 +692,47 @@ install_docker() {
 # GOOGLE DRIVE SETUP
 # =============================================================================
 
-setup_gdrive_oauth() {
-    if [[ "$ENABLE_GDRIVE_BACKUP" != "true" ]]; then
+setup_gdrive() {
+    if [[ "$ENABLE_GDRIVE" != "true" ]]; then
         return 0
     fi
     
-    log "☁️  Thiết lập Google Drive OAuth2..."
+    log "☁️ Thiết lập Google Drive..."
     
     # Install rclone
     if ! command -v rclone &> /dev/null; then
-        log "📦 Cài đặt rclone..."
+        log "Cài đặt rclone..."
         curl https://rclone.org/install.sh | bash
     fi
     
+    # Create rclone config
+    log "Cấu hình rclone cho Google Drive..."
+    
+    mkdir -p ~/.config/rclone
+    
+    cat > ~/.config/rclone/rclone.conf << EOF
+[gdrive]
+type = drive
+client_id = $GDRIVE_CLIENT_ID
+client_secret = $GDRIVE_CLIENT_SECRET
+scope = drive
+EOF
+    
+    # Authorize rclone
     echo ""
-    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}                    ☁️  GOOGLE DRIVE OAUTH2 SETUP                           ${CYAN}║${NC}"
-    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}🔧 HƯỚNG DẪN THIẾT LẬP GOOGLE DRIVE:${NC}"
-    echo ""
-    echo -e "${WHITE}Bước 1: Tạo Google Cloud Project${NC}"
-    echo -e "  1. Truy cập: ${BLUE}https://console.cloud.google.com/${NC}"
-    echo -e "  2. Tạo project mới hoặc chọn project có sẵn"
-    echo -e "  3. Enable Google Drive API:"
-    echo -e "     • Vào 'APIs & Services' > 'Library'"
-    echo -e "     • Tìm 'Google Drive API' và enable"
-    echo ""
-    echo -e "${WHITE}Bước 2: Tạo OAuth2 Credentials${NC}"
-    echo -e "  1. Vào 'APIs & Services' > 'Credentials'"
-    echo -e "  2. Click 'Create Credentials' > 'OAuth client ID'"
-    echo -e "  3. Chọn 'Desktop application'"
-    echo -e "  4. Đặt tên: 'N8N Backup Client'"
-    echo -e "  5. Download file JSON credentials"
-    echo ""
-    echo -e "${WHITE}Bước 3: Cấu hình rclone${NC}"
-    echo -e "  • Sẽ mở trình cấu hình rclone tự động"
-    echo -e "  • Làm theo hướng dẫn để xác thực"
+    echo -e "${YELLOW}🔐 Xác thực Google Drive:${NC}"
+    echo -e "  1. Chạy lệnh sau để xác thực:"
+    echo -e "     ${WHITE}rclone authorize \"drive\"${NC}"
+    echo -e "  2. Trình duyệt sẽ mở, đăng nhập Google"
+    echo -e "  3. Copy token nhận được và paste vào đây"
     echo ""
     
-    read -p "📋 Bạn đã chuẩn bị xong? Nhấn Enter để tiếp tục..." -r
+    read -p "📋 Paste token từ rclone authorize: " gdrive_token
     
-    # Configure rclone
-    echo ""
-    log "🔧 Cấu hình rclone cho Google Drive..."
-    
-    # Check if gdrive remote already exists
-    if rclone listremotes | grep -q "gdrive:"; then
-        warning "Remote 'gdrive' đã tồn tại"
-        read -p "🔄 Bạn có muốn cấu hình lại? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rclone config delete gdrive 2>/dev/null || true
-        else
-            success "Sử dụng cấu hình gdrive hiện có"
-            return 0
-        fi
-    fi
-    
-    # Auto-configure rclone for Google Drive
-    echo ""
-    echo -e "${YELLOW}🤖 Cấu hình tự động rclone...${NC}"
-    echo -e "  • Chọn 'Google Drive' (thường là số 15)"
-    echo -e "  • Client ID và Secret: để trống (nhấn Enter)"
-    echo -e "  • Scope: chọn '1' (Full access)"
-    echo -e "  • Root folder: để trống"
-    echo -e "  • Service account: chọn 'N' (No)"
-    echo -e "  • Advanced config: chọn 'N' (No)"
-    echo -e "  • Auto config: chọn 'Y' (Yes)"
-    echo -e "  • Team drive: chọn 'N' (No)"
-    echo ""
-    
-    # Run rclone config
-    rclone config create gdrive drive
+    # Update config with token
+    cat >> ~/.config/rclone/rclone.conf << EOF
+token = $gdrive_token
+EOF
     
     # Test connection
     log "🧪 Test kết nối Google Drive..."
@@ -772,96 +740,88 @@ setup_gdrive_oauth() {
         success "✅ Kết nối Google Drive thành công"
         
         # Create backup folder
-        log "📁 Tạo thư mục backup trên Google Drive..."
         rclone mkdir gdrive:N8N_Backups 2>/dev/null || true
-        
-        # Get folder ID for faster access
-        GDRIVE_FOLDER_ID=$(rclone lsjson gdrive: | jq -r '.[] | select(.Name=="N8N_Backups") | .ID' 2>/dev/null || echo "")
-        
-        success "✅ Đã tạo thư mục N8N_Backups trên Google Drive"
+        success "📁 Đã tạo thư mục N8N_Backups"
     else
         error "❌ Không thể kết nối Google Drive"
-        warning "Vui lòng chạy lại: rclone config"
-        ENABLE_GDRIVE_BACKUP=false
+        ENABLE_GDRIVE=false
     fi
 }
 
 # =============================================================================
-# RESTORE SYSTEM
+# RESTORE FUNCTIONS
 # =============================================================================
 
 restore_from_backup() {
-    if [[ "$ENABLE_RESTORE" != "true" ]]; then
+    if [[ "$RESTORE_MODE" != "true" ]]; then
         return 0
     fi
     
     log "📦 Bắt đầu restore từ backup..."
     
-    local temp_restore_dir="/tmp/n8n_restore_$(date +%s)"
-    mkdir -p "$temp_restore_dir"
+    local restore_file=""
+    local temp_dir="/tmp/n8n_restore_$(date +%s)"
     
-    # Download/copy backup file
-    case "$RESTORE_SOURCE" in
-        "local")
-            log "📁 Copy file backup local..."
-            cp "$RESTORE_FILE" "$temp_restore_dir/backup.tar.gz"
-            ;;
-        "gdrive")
-            log "☁️  Download backup từ Google Drive..."
-            if ! rclone copy "gdrive:N8N_Backups/$RESTORE_FILE" "$temp_restore_dir/" --progress; then
-                error "Không thể download file từ Google Drive"
-                rm -rf "$temp_restore_dir"
-                return 1
-            fi
-            mv "$temp_restore_dir/$RESTORE_FILE" "$temp_restore_dir/backup.tar.gz"
-            ;;
-    esac
+    if [[ "$RESTORE_FILE" == "gdrive" ]]; then
+        # Restore from Google Drive
+        log "☁️ Restore từ Google Drive..."
+        
+        # List available backups
+        echo ""
+        echo -e "${YELLOW}📋 Danh sách backup trên Google Drive:${NC}"
+        rclone ls gdrive:N8N_Backups/ | grep "\.tar\.gz$" | sort -r | head -10
+        echo ""
+        
+        read -p "📁 Nhập tên file backup (ví dụ: n8n_backup_20250630_120000.tar.gz): " backup_name
+        
+        # Download from Google Drive
+        restore_file="/tmp/$backup_name"
+        log "⬇️ Download backup từ Google Drive..."
+        rclone copy "gdrive:N8N_Backups/$backup_name" /tmp/
+        
+        if [[ ! -f "$restore_file" ]]; then
+            error "Không thể download file backup từ Google Drive"
+            return 1
+        fi
+    else
+        # Restore from local file
+        restore_file="$RESTORE_FILE"
+    fi
     
     # Extract backup
-    log "📦 Giải nén backup..."
-    cd "$temp_restore_dir"
-    tar -xzf backup.tar.gz
+    log "📂 Giải nén backup..."
+    mkdir -p "$temp_dir"
+    tar -xzf "$restore_file" -C "$temp_dir" --strip-components=1
     
-    # Find backup directory
-    local backup_dir=$(find . -maxdepth 1 -type d -name "n8n_backup_*" | head -1)
-    if [[ -z "$backup_dir" ]]; then
-        error "Không tìm thấy thư mục backup trong file"
-        rm -rf "$temp_restore_dir"
-        return 1
+    # Backup current data
+    if [[ -d "$INSTALL_DIR/files" ]]; then
+        log "💾 Backup dữ liệu hiện tại..."
+        mv "$INSTALL_DIR/files" "$INSTALL_DIR/files_backup_$(date +%s)"
     fi
     
     # Restore workflows and credentials
     log "🔄 Restore workflows và credentials..."
     
-    # Create N8N directory if not exists
-    mkdir -p "$INSTALL_DIR/files"
-    
-    # Restore database
-    if [[ -f "$backup_dir/credentials/database.sqlite" ]]; then
-        cp "$backup_dir/credentials/database.sqlite" "$INSTALL_DIR/files/"
-        success "✅ Đã restore database"
+    if [[ -d "$temp_dir/credentials" ]]; then
+        mkdir -p "$INSTALL_DIR/files"
+        cp -r "$temp_dir/credentials/"* "$INSTALL_DIR/files/" 2>/dev/null || true
     fi
     
-    # Restore encryption key
-    if [[ -f "$backup_dir/credentials/encryptionKey" ]]; then
-        cp "$backup_dir/credentials/encryptionKey" "$INSTALL_DIR/files/"
-        success "✅ Đã restore encryption key"
-    fi
-    
-    # Restore config files
-    if [[ -d "$backup_dir/config" ]]; then
-        cp -r "$backup_dir/config/"* "$INSTALL_DIR/" 2>/dev/null || true
-        success "✅ Đã restore config files"
+    if [[ -d "$temp_dir/workflows" ]]; then
+        mkdir -p "$INSTALL_DIR/files/workflows"
+        cp -r "$temp_dir/workflows/"* "$INSTALL_DIR/files/workflows/" 2>/dev/null || true
     fi
     
     # Set proper permissions
-    chown -R 1000:1000 "$INSTALL_DIR/files"
+    chown -R 1000:1000 "$INSTALL_DIR/files" 2>/dev/null || true
     
     # Cleanup
-    rm -rf "$temp_restore_dir"
+    rm -rf "$temp_dir"
+    if [[ "$RESTORE_FILE" == "gdrive" ]]; then
+        rm -f "$restore_file"
+    fi
     
-    success "🎉 Restore hoàn thành!"
-    info "N8N sẽ khởi động với workflows và credentials đã restore"
+    success "✅ Restore hoàn thành"
 }
 
 # =============================================================================
@@ -885,7 +845,7 @@ create_project_structure() {
     fi
     
     # Set proper permissions for N8N
-    chown -R 1000:1000 files/
+    chown -R 1000:1000 "$INSTALL_DIR/files" 2>/dev/null || true
     
     success "Đã tạo cấu trúc thư mục"
 }
@@ -1417,9 +1377,16 @@ EOF
 create_docker_compose() {
     log "🐳 Tạo docker-compose.yml..."
     
+    # Determine ports based on mode
+    local n8n_ports="127.0.0.1:5678:5678"
+    local api_ports="127.0.0.1:8000:8000"
+    
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        # Local Mode - No Caddy, direct port exposure
-        cat > "$INSTALL_DIR/docker-compose.yml" << EOF
+        n8n_ports="5678:5678"
+        api_ports="8000:8000"
+    fi
+    
+    cat > "$INSTALL_DIR/docker-compose.yml" << EOF
 version: '3.8'
 
 services:
@@ -1428,13 +1395,13 @@ services:
     container_name: n8n-container
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      - "${n8n_ports}"
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
-      - WEBHOOK_URL=http://localhost:5678/
+      - WEBHOOK_URL=$([[ "$LOCAL_MODE" == "true" ]] && echo "http://localhost:5678/" || echo "https://${DOMAIN}/")
       - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
       - N8N_METRICS=true
       - N8N_LOG_LEVEL=info
@@ -1458,61 +1425,8 @@ services:
       - n8n_network
 EOF
 
-        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-            cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
-
-  fastapi:
-    build: ./news_api
-    container_name: news-api-container
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      - NEWS_API_TOKEN=${BEARER_TOKEN}
-      - PYTHONUNBUFFERED=1
-    networks:
-      - n8n_network
-EOF
-        fi
-    else
-        # Production Mode - With Caddy reverse proxy
-        cat > "$INSTALL_DIR/docker-compose.yml" << EOF
-version: '3.8'
-
-services:
-  n8n:
-    build: .
-    container_name: n8n-container
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:5678:5678"
-    environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${DOMAIN}/
-      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      - N8N_METRICS=true
-      - N8N_LOG_LEVEL=info
-      - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/home/node
-      - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
-      - DB_TYPE=sqlite
-      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
-      - N8N_BASIC_AUTH_ACTIVE=false
-      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
-      - EXECUTIONS_TIMEOUT=3600
-      - EXECUTIONS_TIMEOUT_MAX=7200
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=500MB
-      - N8N_BINARY_DATA_TTL=1440
-      - N8N_BINARY_DATA_MODE=filesystem
-    volumes:
-      - ./files:/home/node/.n8n
-      - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - n8n_network
+    if [[ "$LOCAL_MODE" != "true" ]]; then
+        cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
 
   caddy:
     image: caddy:latest
@@ -1530,28 +1444,33 @@ services:
     depends_on:
       - n8n
 EOF
+    fi
 
-        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-            cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
-      - fastapi
+    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+        cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
+$([[ "$LOCAL_MODE" != "true" ]] && echo "      - fastapi")
 
   fastapi:
     build: ./news_api
     container_name: news-api-container
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${api_ports}"
     environment:
       - NEWS_API_TOKEN=${BEARER_TOKEN}
       - PYTHONUNBUFFERED=1
     networks:
       - n8n_network
 EOF
-        fi
+    fi
 
-        cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
+    cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
 
 volumes:
+EOF
+
+    if [[ "$LOCAL_MODE" != "true" ]]; then
+        cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
   caddy_data:
   caddy_config:
 EOF
@@ -1716,7 +1635,7 @@ elif [[ -f "/home/n8n/encryptionKey" ]]; then
     cp "/home/n8n/encryptionKey" "$TEMP_DIR/credentials/"
 fi
 
-# Copy all N8N data
+# Copy all files from .n8n directory
 cp -r /home/n8n/files/* "$TEMP_DIR/credentials/" 2>/dev/null || true
 
 # Backup config files
@@ -1759,17 +1678,15 @@ cd "$BACKUP_DIR"
 ls -t n8n_backup_*.tar.gz | tail -n +31 | xargs -r rm -f
 
 # Upload to Google Drive if configured
-if command -v rclone &> /dev/null && rclone listremotes | grep -q "gdrive:"; then
-    log "☁️  Upload backup lên Google Drive..."
-    if rclone copy "$BACKUP_DIR/$BACKUP_NAME.tar.gz" gdrive:N8N_Backups/ --progress; then
-        log "✅ Đã upload lên Google Drive"
-        
-        # Cleanup old backups on Google Drive (keep 30)
-        log "🧹 Cleanup old backups trên Google Drive..."
-        rclone delete gdrive:N8N_Backups/ --min-age 30d 2>/dev/null || true
-    else
-        warning "⚠️ Không thể upload lên Google Drive"
-    fi
+if command -v rclone &> /dev/null && rclone lsd gdrive: &>/dev/null; then
+    log "☁️ Upload to Google Drive..."
+    rclone copy "$BACKUP_DIR/$BACKUP_NAME.tar.gz" gdrive:N8N_Backups/
+    
+    # Cleanup old backups on Google Drive
+    log "🧹 Cleanup old Google Drive backups..."
+    rclone ls gdrive:N8N_Backups/ | grep "n8n_backup_.*\.tar\.gz" | sort -k2 -r | tail -n +31 | awk '{print $2}' | while read file; do
+        rclone delete "gdrive:N8N_Backups/$file"
+    done
 fi
 
 # Send to Telegram if configured
@@ -1787,7 +1704,7 @@ if [[ -f "/home/n8n/telegram_config.txt" ]]; then
 📊 Status: ✅ Success
 
 🗂️ Backup location: \`$BACKUP_DIR\`
-☁️  Google Drive: $(command -v rclone &> /dev/null && echo "✅ Uploaded" || echo "❌ Not configured")"
+☁️ Google Drive: $(command -v rclone &> /dev/null && echo "✅ Uploaded" || echo "❌ Not configured")"
 
         curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
             -d chat_id="$TELEGRAM_CHAT_ID" \
@@ -1840,119 +1757,139 @@ EOF
     chmod +x "$INSTALL_DIR/backup-manual.sh"
     
     # Google Drive restore script
-    cat > "$INSTALL_DIR/gdrive-restore.sh" << 'EOF'
+    if [[ "$ENABLE_GDRIVE" == "true" ]]; then
+        cat > "$INSTALL_DIR/gdrive-restore.sh" << 'EOF'
 #!/bin/bash
 
 # =============================================================================
 # GOOGLE DRIVE RESTORE SCRIPT
 # =============================================================================
 
-set -e
-
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 NC='\033[0m'
 
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
-}
-
-error() {
-    echo -e "${RED}[ERROR] $1${NC}"
-}
-
-info() {
-    echo -e "${BLUE}[INFO] $1${NC}"
-}
-
-echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║${GREEN}                    ☁️  GOOGLE DRIVE RESTORE TOOL                           ${BLUE}║${NC}"
-echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${WHITE}                    📦 GOOGLE DRIVE RESTORE TOOL                             ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # Check rclone
 if ! command -v rclone &> /dev/null; then
-    error "rclone chưa được cài đặt!"
+    echo -e "${RED}❌ rclone không được cài đặt!${NC}"
     exit 1
 fi
 
-if ! rclone listremotes | grep -q "gdrive:"; then
-    error "Google Drive chưa được cấu hình!"
-    echo "Chạy: rclone config"
+# Check Google Drive connection
+if ! rclone lsd gdrive: &>/dev/null; then
+    echo -e "${RED}❌ Không thể kết nối Google Drive!${NC}"
+    echo -e "${YELLOW}Chạy lại script cài đặt để cấu hình Google Drive${NC}"
     exit 1
 fi
 
-# List available backups
-log "📋 Danh sách backup trên Google Drive:"
+echo -e "${BLUE}📋 Danh sách backup trên Google Drive:${NC}"
 echo ""
-rclone ls gdrive:N8N_Backups/ | grep "n8n_backup_.*\.tar\.gz" | sort -r | head -10
+
+# List backups
+backups=$(rclone ls gdrive:N8N_Backups/ | grep "n8n_backup_.*\.tar\.gz" | sort -k2 -r)
+
+if [[ -z "$backups" ]]; then
+    echo -e "${RED}❌ Không tìm thấy backup nào trên Google Drive${NC}"
+    exit 1
+fi
+
+# Display backups with numbers
+echo "$backups" | head -20 | nl -w2 -s'. '
+echo ""
+
+# Get user choice
+while true; do
+    read -p "📦 Chọn số thứ tự backup để restore (1-20): " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [[ $choice -ge 1 ]] && [[ $choice -le 20 ]]; then
+        break
+    else
+        echo -e "${RED}Vui lòng nhập số từ 1-20${NC}"
+    fi
+done
+
+# Get selected backup
+selected_backup=$(echo "$backups" | head -20 | sed -n "${choice}p" | awk '{print $2}')
+
+if [[ -z "$selected_backup" ]]; then
+    echo -e "${RED}❌ Không thể lấy thông tin backup${NC}"
+    exit 1
+fi
 
 echo ""
-read -p "📁 Nhập tên file backup muốn restore: " BACKUP_FILE
+echo -e "${YELLOW}📦 Đã chọn: $selected_backup${NC}"
+echo ""
 
-if [[ -z "$BACKUP_FILE" ]]; then
-    error "Tên file không được để trống!"
-    exit 1
+# Confirm restore
+read -p "⚠️ Bạn có chắc chắn muốn restore? Dữ liệu hiện tại sẽ được backup trước (y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "❌ Đã hủy restore"
+    exit 0
 fi
 
-# Download and restore
-TEMP_DIR="/tmp/gdrive_restore_$(date +%s)"
-mkdir -p "$TEMP_DIR"
-
-log "☁️  Download backup từ Google Drive..."
-if ! rclone copy "gdrive:N8N_Backups/$BACKUP_FILE" "$TEMP_DIR/" --progress; then
-    error "Không thể download file backup!"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-log "📦 Giải nén backup..."
-cd "$TEMP_DIR"
-tar -xzf "$BACKUP_FILE"
-
-# Find backup directory
-BACKUP_DIR=$(find . -maxdepth 1 -type d -name "n8n_backup_*" | head -1)
-if [[ -z "$BACKUP_DIR" ]]; then
-    error "Không tìm thấy thư mục backup!"
-    rm -rf "$TEMP_DIR"
-    exit 1
-fi
-
-log "🔄 Restore N8N data..."
-
-# Stop N8N
-cd /home/n8n
-docker-compose down
+echo ""
+echo -e "${GREEN}🔄 Bắt đầu restore process...${NC}"
 
 # Backup current data
-if [[ -d "files" ]]; then
-    mv files "files_backup_$(date +%s)"
+if [[ -d "/home/n8n/files" ]]; then
+    echo "💾 Backup dữ liệu hiện tại..."
+    mv "/home/n8n/files" "/home/n8n/files_backup_$(date +%s)"
 fi
 
+# Download backup
+echo "⬇️ Download backup từ Google Drive..."
+temp_file="/tmp/$selected_backup"
+rclone copy "gdrive:N8N_Backups/$selected_backup" /tmp/
+
+if [[ ! -f "$temp_file" ]]; then
+    echo -e "${RED}❌ Không thể download backup${NC}"
+    exit 1
+fi
+
+# Extract backup
+echo "📂 Giải nén backup..."
+temp_dir="/tmp/n8n_restore_$(date +%s)"
+mkdir -p "$temp_dir"
+tar -xzf "$temp_file" -C "$temp_dir" --strip-components=1
+
 # Restore data
-mkdir -p files
-cp -r "$TEMP_DIR/$BACKUP_DIR/credentials/"* files/ 2>/dev/null || true
+echo "🔄 Restore workflows và credentials..."
+mkdir -p "/home/n8n/files"
+
+if [[ -d "$temp_dir/credentials" ]]; then
+    cp -r "$temp_dir/credentials/"* "/home/n8n/files/" 2>/dev/null || true
+fi
+
+if [[ -d "$temp_dir/workflows" ]]; then
+    mkdir -p "/home/n8n/files/workflows"
+    cp -r "$temp_dir/workflows/"* "/home/n8n/files/workflows/" 2>/dev/null || true
+fi
 
 # Set permissions
-chown -R 1000:1000 files/
-
-# Restore config
-cp "$TEMP_DIR/$BACKUP_DIR/config/"* . 2>/dev/null || true
-
-# Start N8N
-docker-compose up -d
+chown -R 1000:1000 "/home/n8n/files" 2>/dev/null || true
 
 # Cleanup
-rm -rf "$TEMP_DIR"
+rm -rf "$temp_dir" "$temp_file"
 
-log "🎉 Restore hoàn thành!"
-info "N8N đã được khởi động với dữ liệu đã restore"
+echo ""
+echo -e "${GREEN}✅ Restore hoàn thành!${NC}"
+echo -e "${YELLOW}🔄 Khởi động lại N8N container để áp dụng thay đổi:${NC}"
+echo -e "${WHITE}cd /home/n8n && docker-compose restart n8n${NC}"
+echo ""
 EOF
 
-    chmod +x "$INSTALL_DIR/gdrive-restore.sh"
+        chmod +x "$INSTALL_DIR/gdrive-restore.sh"
+    fi
     
     success "Đã tạo hệ thống backup"
 }
@@ -2033,8 +1970,8 @@ fi
 
 if docker ps | grep -q "caddy-proxy"; then
     log "✅ Caddy container đang chạy"
-else
-    log "ℹ️ Caddy container không chạy (có thể đang ở Local Mode)"
+elif docker ps | grep -q "news-api-container"; then
+    log "✅ News API container đang chạy"
 fi
 
 # Send Telegram notification if configured
@@ -2089,7 +2026,7 @@ EOF
     # Test Telegram connection
     log "🧪 Test kết nối Telegram..."
     
-    local mode_text="Production Mode"
+    local mode_text="Domain Mode"
     if [[ "$LOCAL_MODE" == "true" ]]; then
         mode_text="Local Mode"
     fi
@@ -2101,7 +2038,7 @@ EOF
 🌐 Domain: $DOMAIN
 📰 API Domain: $API_DOMAIN
 💾 Backup: Enabled
-☁️  Google Drive: $([[ "$ENABLE_GDRIVE_BACKUP" == "true" ]] && echo "Enabled" || echo "Disabled")
+☁️ Google Drive: $([[ "$ENABLE_GDRIVE" == "true" ]] && echo "Enabled" || echo "Disabled")
 🔄 Auto-update: $([[ "$ENABLE_AUTO_UPDATE" == "true" ]] && echo "Enabled" || echo "Disabled")
 
 ✅ System is ready!"
@@ -2121,11 +2058,6 @@ EOF
 # =============================================================================
 
 setup_cron_jobs() {
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode - bỏ qua cron jobs"
-        return 0
-    fi
-    
     log "⏰ Thiết lập cron jobs..."
     
     # Remove existing cron jobs for n8n
@@ -2146,23 +2078,24 @@ setup_cron_jobs() {
 # SSL RATE LIMIT DETECTION
 # =============================================================================
 
-parse_ssl_rate_limit_time() {
-    local logs="$1"
-    local rate_limit_time=""
+parse_ssl_retry_time() {
+    local log_line="$1"
     
-    # Extract timestamp from rate limit error
-    if echo "$logs" | grep -q "rateLimited\|too many certificates"; then
-        # Try to extract timestamp from logs
-        rate_limit_time=$(echo "$logs" | grep -E "(rateLimited|too many certificates)" | head -1 | grep -oE '"ts":[0-9.]+' | cut -d: -f2 | cut -d, -f1)
+    # Extract retry time from log line
+    local retry_time=$(echo "$log_line" | grep -oP 'retry after \K[0-9-]+ [0-9:]+' | head -1)
+    
+    if [[ -n "$retry_time" ]]; then
+        # Convert UTC to Vietnam time
+        local utc_time="$retry_time UTC"
+        local vn_time=$(TZ='Asia/Ho_Chi_Minh' date -d "$utc_time" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "")
         
-        if [[ -n "$rate_limit_time" ]]; then
-            # Convert Unix timestamp to Vietnam time and add 7 days
-            local reset_time=$(date -d "@$((${rate_limit_time%.*} + 604800))" +'%Y-%m-%d %H:%M:%S')
-            echo "$reset_time"
+        if [[ -n "$vn_time" ]]; then
+            echo "$vn_time"
         else
-            # Fallback to 7 days from now
-            date -d "+7 days" +'%Y-%m-%d %H:%M:%S'
+            echo "Không xác định được"
         fi
+    else
+        echo "Không xác định được"
     fi
 }
 
@@ -2179,22 +2112,27 @@ check_ssl_rate_limit() {
     # Get Caddy logs
     local caddy_logs=$($DOCKER_COMPOSE logs caddy 2>/dev/null || echo "")
     
-    # Check for successful certificate
+    # Check for different SSL states
+    local rate_limit_detected=false
+    local ssl_success=false
+    local ssl_error=false
+    local retry_time=""
+    
     if echo "$caddy_logs" | grep -q "certificate obtained successfully"; then
-        success "✅ SSL certificate đã được cấp thành công"
-        
-        # Test SSL after a delay
-        sleep 60
-        if curl -I "https://$DOMAIN" &>/dev/null; then
-            success "✅ SSL certificate hoạt động bình thường"
-        else
-            warning "⚠️ SSL có thể chưa sẵn sàng - đợi thêm vài phút"
-        fi
-        return 0
+        ssl_success=true
     fi
     
-    # Check for rate limit
-    if echo "$caddy_logs" | grep -qE "(rateLimited|too many certificates|urn:ietf:params:acme:error:rateLimited)"; then
+    if echo "$caddy_logs" | grep -q "rateLimited\|too many certificates"; then
+        rate_limit_detected=true
+        # Get the latest retry time
+        retry_time=$(echo "$caddy_logs" | grep "retry after" | tail -1 | parse_ssl_retry_time)
+    fi
+    
+    if echo "$caddy_logs" | grep -q "error.*certificate\|failed.*certificate" && [[ "$ssl_success" != "true" ]]; then
+        ssl_error=true
+    fi
+    
+    if [[ "$rate_limit_detected" == "true" ]]; then
         error "🚨 PHÁT HIỆN SSL RATE LIMIT!"
         echo ""
         echo -e "${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -2206,10 +2144,6 @@ check_ssl_rate_limit() {
         echo -e "  • Domain này đã đạt giới hạn miễn phí"
         echo -e "  • Cần đợi đến tuần sau để cấp SSL mới"
         echo ""
-        
-        # Parse rate limit reset time
-        local reset_time=$(parse_ssl_rate_limit_time "$caddy_logs")
-        
         echo -e "${YELLOW}💡 GIẢI PHÁP:${NC}"
         echo -e "  ${GREEN}1. CÀI LẠI UBUNTU (KHUYẾN NGHỊ):${NC}"
         echo -e "     • Cài lại Ubuntu Server hoàn toàn"
@@ -2222,37 +2156,95 @@ check_ssl_rate_limit() {
         echo -e "     • Có thể chuyển về production SSL sau khi rate limit reset"
         echo ""
         echo -e "  ${GREEN}3. ĐỢI ĐẾN KHI RATE LIMIT RESET:${NC}"
-        echo -e "     • Đợi đến sau ${WHITE}${reset_time} (Giờ VN)${NC}"
+        if [[ -n "$retry_time" && "$retry_time" != "Không xác định được" ]]; then
+            echo -e "     • Đợi đến sau ${WHITE}$retry_time (Giờ VN)${NC}"
+        else
+            echo -e "     • Đợi 7 ngày kể từ lần thử SSL cuối cùng"
+        fi
         echo -e "     • Chạy lại script để cấp SSL mới"
         echo ""
         
         echo -e "${YELLOW}📋 LỊCH SỬ SSL ATTEMPTS GẦN ĐÂY:${NC}"
-        echo "$caddy_logs" | grep -E "(certificate obtained|rateLimited|too many certificates)" | tail -5 | while read line; do
+        echo "$caddy_logs" | grep -E "(error|rateLimited|certificate)" | tail -5 | while read line; do
             echo "• $line"
         done
         echo ""
         
-        read -p "🤔 Bạn muốn tiếp tục với Staging SSL? (y/N): " -n 1 -r
+        # Multiple choice menu
+        echo -e "${CYAN}🤔 Bạn muốn làm gì tiếp theo?${NC}"
+        echo -e "  ${WHITE}1.${NC} Tiếp tục với Staging SSL (tạm thời)"
+        echo -e "  ${WHITE}2.${NC} Dừng cài đặt và cài lại Ubuntu"
+        echo -e "  ${WHITE}3.${NC} Dừng cài đặt và đợi rate limit reset"
+        echo ""
+        
+        while true; do
+            read -p "Chọn tùy chọn (1/2/3): " ssl_choice
+            case $ssl_choice in
+                1)
+                    setup_staging_ssl
+                    break
+                    ;;
+                2)
+                    echo ""
+                    echo -e "${CYAN}📋 HƯỚNG DẪN CÀI LẠI UBUNTU:${NC}"
+                    echo -e "  1. Backup dữ liệu quan trọng"
+                    echo -e "  2. Cài lại Ubuntu Server từ đầu"
+                    echo -e "  3. Sử dụng subdomain khác hoặc domain khác"
+                    echo -e "  4. Chạy lại script: curl -sSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh | bash"
+                    echo ""
+                    exit 1
+                    ;;
+                3)
+                    echo ""
+                    echo -e "${YELLOW}⏰ Thời gian đợi rate limit reset:${NC}"
+                    if [[ -n "$retry_time" && "$retry_time" != "Không xác định được" ]]; then
+                        echo -e "  • Đợi đến sau: ${WHITE}$retry_time (Giờ VN)${NC}"
+                    else
+                        echo -e "  • Đợi ít nhất 7 ngày từ lần thử cuối"
+                    fi
+                    echo -e "  • Sau đó chạy lại script để cấp SSL production"
+                    echo ""
+                    exit 1
+                    ;;
+                *)
+                    error "Vui lòng chọn 1, 2 hoặc 3"
+                    ;;
+            esac
+        done
+        
+    elif [[ "$ssl_success" == "true" ]]; then
+        success "✅ SSL certificate đã được cấp thành công"
+        
+        # Test SSL after a short wait
+        sleep 60
+        if curl -I "https://$DOMAIN" &>/dev/null; then
+            success "✅ SSL certificate hoạt động bình thường"
+        else
+            warning "⚠️ SSL có thể chưa sẵn sàng - đợi thêm vài phút"
+        fi
+        
+    elif [[ "$ssl_error" == "true" ]]; then
+        warning "⚠️ Có lỗi SSL nhưng không phải rate limit"
+        echo ""
+        echo -e "${YELLOW}📋 SSL Error Logs:${NC}"
+        echo "$caddy_logs" | grep -E "error.*certificate" | tail -3
+        echo ""
+        
+        read -p "🤔 Bạn có muốn tiếp tục với Staging SSL? (y/N): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             setup_staging_ssl
-        else
-            echo ""
-            echo -e "${CYAN}📋 HƯỚNG DẪN CÀI LẠI UBUNTU:${NC}"
-            echo -e "  1. Backup dữ liệu quan trọng"
-            echo -e "  2. Cài lại Ubuntu Server từ đầu"
-            echo -e "  3. Sử dụng subdomain khác hoặc domain khác"
-            echo -e "  4. Chạy lại script: curl -sSL https://raw.githubusercontent.com/KalvinThien/install-n8n-ffmpeg/main/auto_cai_dat_n8n.sh | bash"
-            echo ""
-            exit 1
         fi
+        
     else
-        # Check for other SSL errors
-        if echo "$caddy_logs" | grep -qE "(error|failed|timeout)"; then
-            warning "⚠️ Có lỗi SSL khác - kiểm tra logs:"
-            echo "$caddy_logs" | grep -E "(error|failed|timeout)" | tail -3
+        info "🔄 SSL đang được xử lý..."
+        sleep 60
+        
+        # Check again after waiting
+        if curl -I "https://$DOMAIN" &>/dev/null; then
+            success "✅ SSL certificate hoạt động bình thường"
         else
-            info "SSL đang được xử lý - đợi thêm vài phút"
+            warning "⚠️ SSL có thể chưa sẵn sàng - kiểm tra lại sau vài phút"
         fi
     fi
 }
@@ -2335,6 +2327,10 @@ build_and_deploy() {
     
     cd "$INSTALL_DIR"
     
+    # Stop old containers first
+    log "🛑 Dừng containers cũ..."
+    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
+    
     # Build images
     log "📦 Build Docker images..."
     $DOCKER_COMPOSE build --no-cache
@@ -2398,18 +2394,11 @@ fi
 
 cd /home/n8n
 
-# Detect mode
-LOCAL_MODE=false
-if [[ -f "docker-compose.yml" ]] && grep -q "5678:5678" docker-compose.yml && ! grep -q "127.0.0.1:5678" docker-compose.yml; then
-    LOCAL_MODE=true
-fi
-
 echo -e "${BLUE}📍 1. System Information:${NC}"
 echo "• OS: $(lsb_release -d | cut -f2)"
 echo "• Kernel: $(uname -r)"
 echo "• Docker: $(docker --version)"
 echo "• Docker Compose: $($DOCKER_COMPOSE --version)"
-echo "• Mode: $([ "$LOCAL_MODE" = true ] && echo "Local Mode" || echo "Production Mode")"
 echo "• Disk Usage: $(df -h /home/n8n | tail -1 | awk '{print $5}')"
 echo "• Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
 echo "• Uptime: $(uptime -p)"
@@ -2424,37 +2413,36 @@ docker images | grep -E "(n8n|caddy|news-api)"
 echo ""
 
 echo -e "${BLUE}📍 4. Network Status:${NC}"
-if [ "$LOCAL_MODE" = true ]; then
-    echo "• Port 5678: $(netstat -tulpn | grep :5678 | wc -l) connections"
-    echo "• Port 8000: $(netstat -tulpn | grep :8000 | wc -l) connections"
-else
-    echo "• Port 80: $(netstat -tulpn | grep :80 | wc -l) connections"
-    echo "• Port 443: $(netstat -tulpn | grep :443 | wc -l) connections"
-fi
+echo "• Port 80: $(netstat -tulpn | grep :80 | wc -l) connections"
+echo "• Port 443: $(netstat -tulpn | grep :443 | wc -l) connections"
+echo "• Port 5678: $(netstat -tulpn | grep :5678 | wc -l) connections"
+echo "• Port 8000: $(netstat -tulpn | grep :8000 | wc -l) connections"
 echo "• Docker Networks:"
 docker network ls | grep n8n
 echo ""
 
-if [ "$LOCAL_MODE" = false ]; then
-    echo -e "${BLUE}📍 5. SSL Certificate Status:${NC}"
-    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile 2>/dev/null | head -1 | awk '{print $1}')
-    if [[ -n "$DOMAIN" ]]; then
+echo -e "${BLUE}📍 5. SSL Certificate Status:${NC}"
+if [[ -f "Caddyfile" ]]; then
+    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
+    if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
         echo "• Domain: $DOMAIN"
         echo "• DNS Resolution: $(dig +short $DOMAIN A | tail -1)"
         echo "• SSL Test:"
         timeout 10 curl -I https://$DOMAIN 2>/dev/null | head -3 || echo "  SSL not ready"
     else
-        echo "• No domain found in Caddyfile"
+        echo "• Local Mode - No SSL needed"
     fi
-    echo ""
+else
+    echo "• No Caddyfile found"
 fi
+echo ""
 
 echo -e "${BLUE}📍 6. Recent Logs (last 10 lines):${NC}"
 echo -e "${YELLOW}N8N Logs:${NC}"
 $DOCKER_COMPOSE logs --tail=10 n8n 2>/dev/null || echo "No N8N logs"
 echo ""
 
-if [ "$LOCAL_MODE" = false ]; then
+if docker ps | grep -q "caddy-proxy"; then
     echo -e "${YELLOW}Caddy Logs:${NC}"
     $DOCKER_COMPOSE logs --tail=10 caddy 2>/dev/null || echo "No Caddy logs"
     echo ""
@@ -2469,7 +2457,7 @@ fi
 echo -e "${BLUE}📍 7. Backup Status:${NC}"
 if [[ -d "/home/n8n/files/backup_full" ]]; then
     BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
-    echo "• Backup files: $BACKUP_COUNT"
+    echo "• Local backups: $BACKUP_COUNT"
     if [[ $BACKUP_COUNT -gt 0 ]]; then
         echo "• Latest backup: $(ls -t /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | xargs basename)"
         echo "• Latest backup size: $(ls -lh /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | awk '{print $5}')"
@@ -2478,35 +2466,28 @@ else
     echo "• No backup directory found"
 fi
 
-# Google Drive status
-if command -v rclone &> /dev/null && rclone listremotes | grep -q "gdrive:"; then
-    echo "• Google Drive: ✅ Configured"
-    GDRIVE_BACKUPS=$(rclone ls gdrive:N8N_Backups/ 2>/dev/null | grep "n8n_backup_" | wc -l)
-    echo "• Google Drive backups: $GDRIVE_BACKUPS files"
+# Check Google Drive
+if command -v rclone &> /dev/null && rclone lsd gdrive: &>/dev/null; then
+    GDRIVE_COUNT=$(rclone ls gdrive:N8N_Backups/ | grep "n8n_backup_.*\.tar\.gz" | wc -l)
+    echo "• Google Drive backups: $GDRIVE_COUNT"
 else
-    echo "• Google Drive: ❌ Not configured"
+    echo "• Google Drive: Not configured"
 fi
 echo ""
 
-if [ "$LOCAL_MODE" = false ]; then
-    echo -e "${BLUE}📍 8. Cron Jobs:${NC}"
-    crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
-    echo ""
-fi
+echo -e "${BLUE}📍 8. Cron Jobs:${NC}"
+crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
+echo ""
 
 echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
 echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE restart"
 echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
 echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
 echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
-
-if [ "$LOCAL_MODE" = true ]; then
-    echo -e "${YELLOW}• Access N8N:${NC} http://localhost:5678"
-    if docker ps | grep -q "news-api"; then
-        echo -e "${YELLOW}• Access News API:${NC} http://localhost:8000"
-    fi
-else
+if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
     echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
+fi
+if [[ -f "/home/n8n/gdrive-restore.sh" ]]; then
     echo -e "${YELLOW}• Google Drive restore:${NC} /home/n8n/gdrive-restore.sh"
 fi
 echo ""
@@ -2551,12 +2532,11 @@ show_final_summary() {
     
     echo ""
     echo -e "${CYAN}📁 THÔNG TIN HỆ THỐNG:${NC}"
-    echo -e "  • Chế độ: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")${NC}"
+    echo -e "  • Chế độ: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Domain Mode")${NC}"
     echo -e "  • Thư mục cài đặt: ${WHITE}${INSTALL_DIR}${NC}"
     echo -e "  • Script chẩn đoán: ${WHITE}${INSTALL_DIR}/troubleshoot.sh${NC}"
     echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
-    
-    if [[ "$ENABLE_GDRIVE_BACKUP" == "true" ]]; then
+    if [[ "$ENABLE_GDRIVE" == "true" ]]; then
         echo -e "  • Google Drive restore: ${WHITE}${INSTALL_DIR}/gdrive-restore.sh${NC}"
     fi
     echo ""
@@ -2566,11 +2546,8 @@ show_final_summary() {
     echo -e "  • Swap: ${WHITE}${swap_info:-"Không có"}${NC}"
     echo -e "  • Auto-update: ${WHITE}$([[ "$ENABLE_AUTO_UPDATE" == "true" ]] && echo "Enabled (mỗi 12h)" || echo "Disabled")${NC}"
     echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Enabled" || echo "Disabled")${NC}"
-    echo -e "  • Google Drive backup: ${WHITE}$([[ "$ENABLE_GDRIVE_BACKUP" == "true" ]] && echo "Enabled" || echo "Disabled")${NC}"
-    
-    if [[ "$LOCAL_MODE" != "true" ]]; then
-        echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
-    fi
+    echo -e "  • Google Drive backup: ${WHITE}$([[ "$ENABLE_GDRIVE" == "true" ]] && echo "Enabled" || echo "Disabled")${NC}"
+    echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
     echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
     echo ""
     
@@ -2580,11 +2557,11 @@ show_final_summary() {
         echo ""
     fi
     
-    if [[ "$ENABLE_GDRIVE_BACKUP" == "true" ]]; then
-        echo -e "${CYAN}☁️  GOOGLE DRIVE COMMANDS:${NC}"
-        echo -e "  • List backups: ${WHITE}rclone ls gdrive:N8N_Backups/${NC}"
-        echo -e "  • Manual upload: ${WHITE}rclone copy /home/n8n/files/backup_full/backup.tar.gz gdrive:N8N_Backups/${NC}"
-        echo -e "  • Restore tool: ${WHITE}/home/n8n/gdrive-restore.sh${NC}"
+    if [[ "$RESTORE_MODE" == "true" ]]; then
+        echo -e "${CYAN}📦 RESTORE COMPLETED:${NC}"
+        echo -e "  • Dữ liệu đã được restore từ backup"
+        echo -e "  • Workflows và credentials đã được khôi phục"
+        echo -e "  • Khởi động lại container để áp dụng thay đổi"
         echo ""
     fi
     
@@ -2629,7 +2606,7 @@ main() {
     get_gdrive_config
     get_auto_update_config
     
-    # Verify DNS (skip for local mode)
+    # Verify DNS
     verify_dns
     
     # Cleanup old installation
@@ -2638,8 +2615,8 @@ main() {
     # Install Docker
     install_docker
     
-    # Setup Google Drive OAuth
-    setup_gdrive_oauth
+    # Setup Google Drive
+    setup_gdrive
     
     # Create project structure
     create_project_structure
@@ -2661,13 +2638,13 @@ main() {
     # Setup Telegram
     setup_telegram_config
     
-    # Setup cron jobs (skip for local mode)
+    # Setup cron jobs
     setup_cron_jobs
     
     # Build and deploy
     build_and_deploy
     
-    # Check SSL and rate limits (skip for local mode)
+    # Check SSL and rate limits
     check_ssl_rate_limit
     
     # Show final summary
