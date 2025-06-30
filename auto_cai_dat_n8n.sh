@@ -49,7 +49,7 @@ show_banner() {
     echo -e "${CYAN}║${WHITE} 📰 News Content API với FastAPI + Newspaper4k                            ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 📱 Telegram Backup tự động hàng ngày                                     ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔄 Auto-Update với tùy chọn                                              ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE} 🏠 Hỗ trợ cài đặt Local Mode (không cần domain)                         ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} 🏠 Local Mode cho development                                            ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${YELLOW} 👨‍💻 Tác giả: Nguyễn Ngọc Thiện                                           ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW} 📺 YouTube: https://www.youtube.com/@kalvinthiensocial                  ${CYAN}║${NC}"
@@ -92,12 +92,12 @@ show_help() {
     echo "  -d, --dir DIR       Thư mục cài đặt (mặc định: /home/n8n)"
     echo "  -c, --clean         Xóa cài đặt cũ trước khi cài mới"
     echo "  -s, --skip-docker   Bỏ qua cài đặt Docker (nếu đã có)"
-    echo "  -l, --local         Cài đặt Local Mode (không cần domain)"
+    echo "  -l, --local         Cài đặt Local Mode (không cần domain/SSL)"
     echo ""
     echo "Ví dụ:"
-    echo "  $0                  # Cài đặt bình thường với domain"
-    echo "  $0 --local         # Cài đặt Local Mode"
+    echo "  $0                  # Cài đặt bình thường"
     echo "  $0 --clean         # Xóa cài đặt cũ và cài mới"
+    echo "  $0 --local         # Cài đặt Local Mode"
     echo "  $0 -d /opt/n8n     # Cài đặt vào thư mục /opt/n8n"
     echo ""
 }
@@ -238,15 +238,17 @@ get_installation_mode() {
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${WHITE}Chọn chế độ cài đặt:${NC}"
-    echo -e "  ${GREEN}1. Production Mode (có domain + SSL)${NC}"
-    echo -e "     • Cần domain đã trỏ về server"
-    echo -e "     • Tự động cấp SSL certificate"
-    echo -e "     • Phù hợp cho production"
+    echo -e "  ${GREEN}1. Production Mode (Khuyến nghị cho server):${NC}"
+    echo -e "     • Cần domain và SSL certificate"
+    echo -e "     • Reverse proxy với Caddy"
+    echo -e "     • Auto backup và update"
+    echo -e "     • Telegram notifications"
     echo ""
-    echo -e "  ${GREEN}2. Local Mode (không cần domain)${NC}"
-    echo -e "     • Chạy trên localhost"
-    echo -e "     • Không cần SSL certificate"
-    echo -e "     • Phù hợp cho development/testing"
+    echo -e "  ${BLUE}2. Local Mode (Cho development/test):${NC}"
+    echo -e "     • Không cần domain"
+    echo -e "     • Truy cập qua localhost"
+    echo -e "     • Không có SSL"
+    echo -e "     • Đơn giản và nhanh chóng"
     echo ""
     
     read -p "🏠 Bạn muốn cài đặt Local Mode? (y/N): " -n 1 -r
@@ -255,7 +257,6 @@ get_installation_mode() {
         LOCAL_MODE=true
         info "Đã chọn Local Mode"
     else
-        LOCAL_MODE=false
         info "Đã chọn Production Mode"
     fi
 }
@@ -264,7 +265,6 @@ get_domain_input() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
         DOMAIN="localhost"
         API_DOMAIN="localhost"
-        info "Local Mode: Sử dụng localhost"
         return 0
     fi
     
@@ -332,17 +332,18 @@ get_news_api_config() {
     
     echo ""
     echo -e "${YELLOW}🔐 Thiết lập Bearer Token cho News API:${NC}"
-    echo -e "  • Token phải có ít nhất 20 ký tự"
-    echo -e "  • Chỉ chứa chữ cái và số"
+    echo -e "  • Có thể chứa chữ cái, số và ký tự đặc biệt"
+    echo -e "  • Độ dài tối thiểu: 8 ký tự"
     echo -e "  • Sẽ được sử dụng để xác thực API calls"
+    echo -e "  • Ví dụ: MySecureToken@2025!, abc123XYZ, Token_2025#Strong"
     echo ""
     
     while true; do
-        read -p "🔑 Nhập Bearer Token (ít nhất 20 ký tự): " BEARER_TOKEN
-        if [[ ${#BEARER_TOKEN} -ge 20 && "$BEARER_TOKEN" =~ ^[a-zA-Z0-9]+$ ]]; then
+        read -p "🔑 Nhập Bearer Token (tối thiểu 8 ký tự): " BEARER_TOKEN
+        if [[ ${#BEARER_TOKEN} -ge 8 ]]; then
             break
         else
-            error "Token phải có ít nhất 20 ký tự và chỉ chứa chữ cái, số."
+            error "Token phải có ít nhất 8 ký tự."
         fi
     done
     
@@ -351,7 +352,6 @@ get_news_api_config() {
 
 get_telegram_config() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua cấu hình Telegram"
         ENABLE_TELEGRAM=false
         return 0
     fi
@@ -414,7 +414,6 @@ get_telegram_config() {
 
 get_auto_update_config() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua Auto-Update"
         ENABLE_AUTO_UPDATE=false
         return 0
     fi
@@ -447,7 +446,6 @@ get_auto_update_config() {
 
 verify_dns() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua kiểm tra DNS"
         return 0
     fi
     
@@ -584,14 +582,11 @@ create_project_structure() {
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     
-    # Create directories with proper permissions
+    # Create directories
     mkdir -p files/backup_full
     mkdir -p files/temp
     mkdir -p files/youtube_content_anylystic
     mkdir -p logs
-    
-    # Set proper ownership for N8N data directory
-    chown -R 1000:1000 files/
     
     if [[ "$ENABLE_NEWS_API" == "true" ]]; then
         mkdir -p news_api
@@ -644,10 +639,6 @@ USER node
 
 # Install additional N8N nodes
 RUN npm install n8n-nodes-puppeteer
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:5678/healthz || exit 1
 
 WORKDIR /data
 EOF
@@ -1118,10 +1109,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
 # Expose port
 EXPOSE 8000
 
@@ -1178,6 +1165,8 @@ EOF
 
         if [[ "$ENABLE_NEWS_API" == "true" ]]; then
             cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
+    depends_on:
+      - fastapi
 
   fastapi:
     build: ./news_api
@@ -1194,7 +1183,7 @@ EOF
         fi
 
     else
-        # Production Mode - With Caddy reverse proxy
+        # Production Mode - With Caddy
         cat > "$INSTALL_DIR/docker-compose.yml" << EOF
 version: '3.8'
 
@@ -1232,26 +1221,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - n8n_network
-
-  caddy:
-    image: caddy:latest
-    container_name: caddy-proxy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - n8n_network
-    depends_on:
-      - n8n
 EOF
 
         if [[ "$ENABLE_NEWS_API" == "true" ]]; then
             cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
+    depends_on:
       - fastapi
 
   fastapi:
@@ -1270,13 +1244,29 @@ EOF
 
         cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
 
-volumes:
-  caddy_data:
-  caddy_config:
+  caddy:
+    image: caddy:latest
+    container_name: caddy-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - n8n_network
+    depends_on:
+      - n8n
 EOF
     fi
 
     cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
+
+volumes:
+  caddy_data:
+  caddy_config:
 
 networks:
   n8n_network:
@@ -1288,7 +1278,6 @@ EOF
 
 create_caddyfile() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua tạo Caddyfile"
         return 0
     fi
     
@@ -1311,14 +1300,6 @@ ${DOMAIN} {
     }
     
     encode gzip
-    
-    # Error pages
-    handle_errors {
-        @502 expression {http.error.status_code} == 502
-        handle @502 {
-            respond "N8N service is starting up. Please wait a moment and refresh." 502
-        }
-    }
     
     log {
         output file /var/log/caddy/n8n.log
@@ -1345,14 +1326,6 @@ ${API_DOMAIN} {
     
     encode gzip
     
-    # Error pages
-    handle_errors {
-        @502 expression {http.error.status_code} == 502
-        handle @502 {
-            respond "News API service is starting up. Please wait a moment and refresh." 502
-        }
-    }
-    
     log {
         output file /var/log/caddy/api.log
         format json
@@ -1369,6 +1342,10 @@ EOF
 # =============================================================================
 
 create_backup_scripts() {
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        return 0
+    fi
+    
     log "💾 Tạo hệ thống backup..."
     
     # Main backup script
@@ -1637,7 +1614,7 @@ fi
 if docker ps | grep -q "caddy-proxy"; then
     log "✅ Caddy container đang chạy"
 else
-    log "ℹ️ Caddy container không chạy (có thể đang ở Local Mode)"
+    error "❌ Caddy container không chạy"
 fi
 
 # Send Telegram notification if configured
@@ -1692,15 +1669,9 @@ EOF
     # Test Telegram connection
     log "🧪 Test kết nối Telegram..."
     
-    local mode_text="Production Mode"
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        mode_text="Local Mode"
-    fi
-    
     TEST_MESSAGE="🚀 *N8N Installation Completed*
 
 📅 Date: $(date +'%Y-%m-%d %H:%M:%S')
-🏠 Mode: $mode_text
 🌐 Domain: $DOMAIN
 📰 API Domain: $API_DOMAIN
 💾 Backup: Enabled
@@ -1724,7 +1695,6 @@ EOF
 
 setup_cron_jobs() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua thiết lập cron jobs"
         return 0
     fi
     
@@ -1748,73 +1718,29 @@ setup_cron_jobs() {
 # SSL RATE LIMIT DETECTION
 # =============================================================================
 
-parse_ssl_rate_limit_time() {
+extract_ssl_rate_limit_time() {
     local logs="$1"
     local rate_limit_time=""
     
-    # Try to extract timestamp from various log formats
-    if echo "$logs" | grep -q "retry-after"; then
-        # Extract retry-after header value
-        rate_limit_time=$(echo "$logs" | grep -i "retry-after" | head -1 | sed -n 's/.*retry-after[: ]*\([0-9-T:Z ]*\).*/\1/ip')
-    elif echo "$logs" | grep -q "rateLimited"; then
-        # Extract timestamp from rateLimited message
-        rate_limit_time=$(echo "$logs" | grep -i "rateLimited" | head -1 | sed -n 's/.*time[": ]*\([0-9-T:Z ]*\).*/\1/ip')
-    elif echo "$logs" | grep -q "too many certificates"; then
-        # Extract timestamp from "too many certificates" error
-        rate_limit_time=$(echo "$logs" | grep -i "too many certificates" | head -1 | awk '{print $1" "$2}')
-    fi
+    # Look for rate limit messages with timestamps
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "rateLimited\|too many certificates\|rate limit"; then
+            # Extract timestamp from log line
+            local timestamp=$(echo "$line" | grep -o '"ts":[0-9.]*' | cut -d: -f2)
+            if [[ -n "$timestamp" ]]; then
+                # Convert timestamp to readable date and add 7 days
+                local reset_time=$(date -d "@$((${timestamp%.*} + 604800))" '+%Y-%m-%d %H:%M:%S UTC' 2>/dev/null || echo "7 ngày từ bây giờ")
+                rate_limit_time="$reset_time"
+                break
+            fi
+        fi
+    done <<< "$logs"
     
     echo "$rate_limit_time"
 }
 
-calculate_reset_time() {
-    local rate_limit_time="$1"
-    local reset_time=""
-    
-    if [[ -n "$rate_limit_time" ]]; then
-        # Try to calculate reset time (add 7 days to rate limit time)
-        if command -v python3 &> /dev/null; then
-            reset_time=$(python3 -c "
-import datetime
-import re
-try:
-    # Try different date formats
-    time_str = '$rate_limit_time'
-    formats = [
-        '%Y-%m-%d %H:%M:%S',
-        '%Y-%m-%dT%H:%M:%SZ',
-        '%Y-%m-%dT%H:%M:%S.%fZ',
-        '%a %b %d %H:%M:%S %Y'
-    ]
-    
-    parsed_time = None
-    for fmt in formats:
-        try:
-            parsed_time = datetime.datetime.strptime(time_str.strip(), fmt)
-            break
-        except:
-            continue
-    
-    if parsed_time:
-        reset_time = parsed_time + datetime.timedelta(days=7)
-        print(reset_time.strftime('%Y-%m-%d %H:%M:%S UTC'))
-    else:
-        print('Unable to parse time')
-except Exception as e:
-    print('Error calculating reset time')
-" 2>/dev/null)
-        elif command -v date &> /dev/null; then
-            # Fallback to date command
-            reset_time=$(date -d "$rate_limit_time + 7 days" "+%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || echo "Unable to calculate")
-        fi
-    fi
-    
-    echo "$reset_time"
-}
-
 check_ssl_rate_limit() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        info "Local Mode: Bỏ qua kiểm tra SSL"
         return 0
     fi
     
@@ -1823,14 +1749,27 @@ check_ssl_rate_limit() {
     # Wait for containers to start
     sleep 30
     
-    # Check Caddy logs for rate limit
-    local rate_limit_detected=false
-    local caddy_logs=""
+    # Get Caddy logs
+    local caddy_logs=$($DOCKER_COMPOSE logs caddy 2>/dev/null || echo "")
     
-    if caddy_logs=$($DOCKER_COMPOSE logs caddy 2>/dev/null); then
-        if echo "$caddy_logs" | grep -q "rateLimited\|too many certificates\|rate limit"; then
-            rate_limit_detected=true
+    # Check for successful certificate obtainment first
+    if echo "$caddy_logs" | grep -q "certificate obtained successfully"; then
+        success "✅ SSL certificate đã được cấp thành công"
+        
+        # Test SSL after a short wait
+        sleep 30
+        if curl -I "https://$DOMAIN" &>/dev/null; then
+            success "✅ SSL certificate hoạt động bình thường"
+        else
+            warning "⚠️ SSL có thể chưa sẵn sàng hoàn toàn - đợi thêm vài phút"
         fi
+        return 0
+    fi
+    
+    # Check for rate limit errors
+    local rate_limit_detected=false
+    if echo "$caddy_logs" | grep -q "rateLimited\|too many certificates\|rate limit"; then
+        rate_limit_detected=true
     fi
     
     if [[ "$rate_limit_detected" == "true" ]]; then
@@ -1840,27 +1779,14 @@ check_ssl_rate_limit() {
         echo -e "${RED}║${WHITE}                        ⚠️  SSL RATE LIMIT DETECTED                          ${RED}║${NC}"
         echo -e "${RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
         echo ""
-        
-        # Parse rate limit time from logs
-        local rate_limit_time=$(parse_ssl_rate_limit_time "$caddy_logs")
-        local reset_time=$(calculate_reset_time "$rate_limit_time")
-        
         echo -e "${YELLOW}🔍 NGUYÊN NHÂN:${NC}"
         echo -e "  • Let's Encrypt giới hạn 5 certificates/domain/tuần"
         echo -e "  • Domain này đã đạt giới hạn miễn phí"
         echo -e "  • Cần đợi đến tuần sau để cấp SSL mới"
         echo ""
         
-        if [[ -n "$rate_limit_time" ]]; then
-            echo -e "${YELLOW}📅 THÔNG TIN RATE LIMIT:${NC}"
-            echo -e "  • Thời gian rate limit: ${WHITE}$rate_limit_time${NC}"
-            if [[ -n "$reset_time" && "$reset_time" != "Unable to calculate" && "$reset_time" != "Error calculating reset time" ]]; then
-                echo -e "  • Rate limit sẽ được reset vào: ${WHITE}$reset_time${NC}"
-            else
-                echo -e "  • Rate limit sẽ được reset sau: ${WHITE}7 ngày kể từ lần thử cuối${NC}"
-            fi
-            echo ""
-        fi
+        # Extract rate limit reset time
+        local reset_time=$(extract_ssl_rate_limit_time "$caddy_logs")
         
         echo -e "${YELLOW}💡 GIẢI PHÁP:${NC}"
         echo -e "  ${GREEN}1. CÀI LẠI UBUNTU (KHUYẾN NGHỊ):${NC}"
@@ -1874,17 +1800,17 @@ check_ssl_rate_limit() {
         echo -e "     • Có thể chuyển về production SSL sau khi rate limit reset"
         echo ""
         echo -e "  ${GREEN}3. ĐỢI ĐẾN KHI RATE LIMIT RESET:${NC}"
-        if [[ -n "$reset_time" && "$reset_time" != "Unable to calculate" && "$reset_time" != "Error calculating reset time" ]]; then
-            echo -e "     • Đợi đến sau ${WHITE}$reset_time${NC}"
+        if [[ -n "$reset_time" ]]; then
+            echo -e "     • Đợi đến sau: ${WHITE}$reset_time${NC}"
         else
             echo -e "     • Đợi 7 ngày kể từ lần thử SSL cuối cùng"
         fi
         echo -e "     • Chạy lại script để cấp SSL mới"
         echo ""
         
-        echo -e "${YELLOW}📋 LỊCH SỬ SSL ATTEMPTS GẦN ĐÂY:${NC}"
-        echo "$caddy_logs" | grep -i "certificate\|ssl\|acme\|rate" | tail -5 | while read line; do
-            echo -e "  ${WHITE}• $line${NC}"
+        echo -e "${CYAN}📋 LỊCH SỬ SSL ATTEMPTS GẦN ĐÂY:${NC}"
+        echo "$caddy_logs" | grep -E "(certificate|ssl|acme|rateLimited)" | tail -5 | while read line; do
+            echo -e "  • $line"
         done
         echo ""
         
@@ -1903,12 +1829,17 @@ check_ssl_rate_limit() {
             exit 1
         fi
     else
-        # Test SSL
-        sleep 60
-        if curl -I "https://$DOMAIN" &>/dev/null; then
-            success "✅ SSL certificate đã được cấp thành công"
-        else
-            warning "⚠️ SSL có thể chưa sẵn sàng - đợi thêm vài phút"
+        # SSL might be in progress or failed for other reasons
+        warning "⚠️ SSL certificate chưa được cấp - kiểm tra logs để biết thêm chi tiết"
+        echo ""
+        echo -e "${YELLOW}📋 Caddy Logs gần đây:${NC}"
+        echo "$caddy_logs" | tail -10
+        echo ""
+        
+        read -p "🤔 Bạn có muốn tiếp tục? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
         fi
     fi
 }
@@ -1991,9 +1922,9 @@ build_and_deploy() {
     
     cd "$INSTALL_DIR"
     
-    # Stop old containers first
-    log "🛑 Dừng containers cũ..."
-    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
+    # Fix permissions for N8N data directory
+    log "🔧 Fix quyền truy cập cho N8N..."
+    chown -R 1000:1000 "$INSTALL_DIR/files" 2>/dev/null || true
     
     # Build images
     log "📦 Build Docker images..."
@@ -2007,48 +1938,18 @@ build_and_deploy() {
     log "⏳ Đợi services khởi động..."
     sleep 30
     
-    # Check container status with health checks
+    # Check container status
     log "🔍 Kiểm tra trạng thái containers..."
-    
-    local max_retries=10
-    local retry_count=0
-    local all_healthy=false
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        local n8n_status=$(docker inspect n8n-container --format='{{.State.Health.Status}}' 2>/dev/null || echo "no-health-check")
+    if $DOCKER_COMPOSE ps | grep -q "Up"; then
+        success "✅ Containers đã khởi động thành công"
         
-        if [[ "$n8n_status" == "healthy" ]] || docker ps | grep -q "n8n-container.*Up"; then
-            success "✅ N8N container đã khởi động thành công"
-            all_healthy=true
-            break
-        else
-            warning "⏳ Đợi N8N container khởi động... (${retry_count}/${max_retries})"
-            sleep 10
-            ((retry_count++))
-        fi
-    done
-    
-    if [[ "$all_healthy" != "true" ]]; then
+        # Show running containers
+        info "📋 Containers đang chạy:"
+        $DOCKER_COMPOSE ps
+    else
         error "❌ Có lỗi khi khởi động containers"
-        echo ""
-        echo -e "${YELLOW}📋 Container logs:${NC}"
-        $DOCKER_COMPOSE logs --tail=20
-        echo ""
-        echo -e "${YELLOW}🔧 Thử fix quyền và restart:${NC}"
-        
-        # Fix permissions
-        chown -R 1000:1000 "$INSTALL_DIR/files/"
-        
-        # Restart containers
-        $DOCKER_COMPOSE restart
-        sleep 30
-        
-        if docker ps | grep -q "n8n-container.*Up"; then
-            success "✅ Đã fix và containers hoạt động bình thường"
-        else
-            error "❌ Vẫn có lỗi - vui lòng chạy troubleshoot script"
-            exit 1
-        fi
+        $DOCKER_COMPOSE logs
+        exit 1
     fi
 }
 
@@ -2092,64 +1993,63 @@ fi
 
 cd /home/n8n
 
+# Detect installation mode
+LOCAL_MODE=false
+if [[ -f "docker-compose.yml" ]] && grep -q "5678:5678" docker-compose.yml && ! grep -q "caddy" docker-compose.yml; then
+    LOCAL_MODE=true
+fi
+
 echo -e "${BLUE}📍 1. System Information:${NC}"
 echo "• OS: $(lsb_release -d | cut -f2)"
 echo "• Kernel: $(uname -r)"
 echo "• Docker: $(docker --version)"
 echo "• Docker Compose: $($DOCKER_COMPOSE --version)"
+echo "• Installation Mode: $([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")"
 echo "• Disk Usage: $(df -h /home/n8n | tail -1 | awk '{print $5}')"
 echo "• Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
 echo "• Uptime: $(uptime -p)"
 echo ""
 
-echo -e "${BLUE}📍 2. Installation Mode:${NC}"
-if [[ -f "Caddyfile" ]]; then
-    echo "• Mode: Production Mode (with SSL)"
-    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
-    echo "• Domain: $DOMAIN"
-else
-    echo "• Mode: Local Mode"
-    echo "• Access: http://localhost:5678"
-fi
-echo ""
-
-echo -e "${BLUE}📍 3. Container Status:${NC}"
+echo -e "${BLUE}📍 2. Container Status:${NC}"
 $DOCKER_COMPOSE ps
 echo ""
 
-echo -e "${BLUE}📍 4. Docker Images:${NC}"
+echo -e "${BLUE}📍 3. Docker Images:${NC}"
 docker images | grep -E "(n8n|caddy|news-api)"
 echo ""
 
-echo -e "${BLUE}📍 5. Network Status:${NC}"
-echo "• Port 80: $(netstat -tulpn 2>/dev/null | grep :80 | wc -l) connections"
-echo "• Port 443: $(netstat -tulpn 2>/dev/null | grep :443 | wc -l) connections"
-echo "• Port 5678: $(netstat -tulpn 2>/dev/null | grep :5678 | wc -l) connections"
-echo "• Port 8000: $(netstat -tulpn 2>/dev/null | grep :8000 | wc -l) connections"
+echo -e "${BLUE}📍 4. Network Status:${NC}"
+if [[ "$LOCAL_MODE" == "true" ]]; then
+    echo "• Port 5678: $(netstat -tulpn | grep :5678 | wc -l) connections"
+    echo "• Port 8000: $(netstat -tulpn | grep :8000 | wc -l) connections"
+else
+    echo "• Port 80: $(netstat -tulpn | grep :80 | wc -l) connections"
+    echo "• Port 443: $(netstat -tulpn | grep :443 | wc -l) connections"
+fi
 echo "• Docker Networks:"
 docker network ls | grep n8n
 echo ""
 
-if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
-    echo -e "${BLUE}📍 6. SSL Certificate Status:${NC}"
-    echo "• Domain: $DOMAIN"
-    echo "• DNS Resolution: $(dig +short $DOMAIN A | tail -1)"
-    echo "• SSL Test:"
-    timeout 10 curl -I https://$DOMAIN 2>/dev/null | head -3 || echo "  SSL not ready"
+if [[ "$LOCAL_MODE" == "false" ]]; then
+    echo -e "${BLUE}📍 5. SSL Certificate Status:${NC}"
+    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
+    if [[ -n "$DOMAIN" ]]; then
+        echo "• Domain: $DOMAIN"
+        echo "• DNS Resolution: $(dig +short $DOMAIN A | tail -1)"
+        echo "• SSL Test:"
+        timeout 10 curl -I https://$DOMAIN 2>/dev/null | head -3 || echo "  SSL not ready"
+    else
+        echo "• No domain found in Caddyfile"
+    fi
     echo ""
 fi
 
-echo -e "${BLUE}📍 7. File Permissions:${NC}"
-echo "• N8N data directory: $(ls -ld /home/n8n/files | awk '{print $1" "$3":"$4}')"
-echo "• Database file: $(ls -l /home/n8n/files/database.sqlite 2>/dev/null | awk '{print $1" "$3":"$4}' || echo 'Not found')"
-echo ""
-
-echo -e "${BLUE}📍 8. Recent Logs (last 10 lines):${NC}"
+echo -e "${BLUE}📍 6. Recent Logs (last 10 lines):${NC}"
 echo -e "${YELLOW}N8N Logs:${NC}"
 $DOCKER_COMPOSE logs --tail=10 n8n 2>/dev/null || echo "No N8N logs"
 echo ""
 
-if docker ps | grep -q "caddy-proxy"; then
+if [[ "$LOCAL_MODE" == "false" ]]; then
     echo -e "${YELLOW}Caddy Logs:${NC}"
     $DOCKER_COMPOSE logs --tail=10 caddy 2>/dev/null || echo "No Caddy logs"
     echo ""
@@ -2161,35 +2061,42 @@ if docker ps | grep -q "news-api"; then
     echo ""
 fi
 
-echo -e "${BLUE}📍 9. Backup Status:${NC}"
-if [[ -d "/home/n8n/files/backup_full" ]]; then
-    BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
-    echo "• Backup files: $BACKUP_COUNT"
-    if [[ $BACKUP_COUNT -gt 0 ]]; then
-        echo "• Latest backup: $(ls -t /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | xargs basename)"
-        echo "• Latest backup size: $(ls -lh /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | awk '{print $5}')"
+if [[ "$LOCAL_MODE" == "false" ]]; then
+    echo -e "${BLUE}📍 7. Backup Status:${NC}"
+    if [[ -d "/home/n8n/files/backup_full" ]]; then
+        BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
+        echo "• Backup files: $BACKUP_COUNT"
+        if [[ $BACKUP_COUNT -gt 0 ]]; then
+            echo "• Latest backup: $(ls -t /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | xargs basename)"
+            echo "• Latest backup size: $(ls -lh /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | awk '{print $5}')"
+        fi
+    else
+        echo "• No backup directory found"
     fi
-else
-    echo "• No backup directory found"
-fi
-echo ""
+    echo ""
 
-echo -e "${BLUE}📍 10. Cron Jobs:${NC}"
-crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
-echo ""
+    echo -e "${BLUE}📍 8. Cron Jobs:${NC}"
+    crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
+    echo ""
+fi
 
 echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
-echo -e "${YELLOW}• Fix permissions:${NC} chown -R 1000:1000 /home/n8n/files/"
 echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE restart"
 echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
 echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
-echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
 
-if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
+if [[ "$LOCAL_MODE" == "false" ]]; then
+    echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
+    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
     echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
+else
+    echo -e "${YELLOW}• Test N8N:${NC} curl -I http://localhost:5678"
+    if docker ps | grep -q "news-api"; then
+        echo -e "${YELLOW}• Test News API:${NC} curl -I http://localhost:8000"
+    fi
 fi
-
 echo ""
+
 echo -e "${CYAN}✅ Troubleshooting completed!${NC}"
 EOF
 
@@ -2230,35 +2137,29 @@ show_final_summary() {
     
     echo ""
     echo -e "${CYAN}📁 THÔNG TIN HỆ THỐNG:${NC}"
-    echo -e "  • Chế độ: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")${NC}"
+    echo -e "  • Chế độ cài đặt: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")${NC}"
     echo -e "  • Thư mục cài đặt: ${WHITE}${INSTALL_DIR}${NC}"
     echo -e "  • Script chẩn đoán: ${WHITE}${INSTALL_DIR}/troubleshoot.sh${NC}"
-    echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
+    
+    if [[ "$LOCAL_MODE" == "false" ]]; then
+        echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
+    fi
     echo ""
     
-    echo -e "${CYAN}💾 CẤU HÌNH BACKUP:${NC}"
-    local swap_info=$(swapon --show | grep -v NAME | awk '{print $3}' | head -1)
-    echo -e "  • Swap: ${WHITE}${swap_info:-"Không có"}${NC}"
-    echo -e "  • Auto-update: ${WHITE}$([[ "$ENABLE_AUTO_UPDATE" == "true" ]] && echo "Enabled (mỗi 12h)" || echo "Disabled")${NC}"
-    echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Enabled" || echo "Disabled")${NC}"
-    if [[ "$LOCAL_MODE" != "true" ]]; then
+    if [[ "$LOCAL_MODE" == "false" ]]; then
+        echo -e "${CYAN}💾 CẤU HÌNH BACKUP:${NC}"
+        local swap_info=$(swapon --show | grep -v NAME | awk '{print $3}' | head -1)
+        echo -e "  • Swap: ${WHITE}${swap_info:-"Không có"}${NC}"
+        echo -e "  • Auto-update: ${WHITE}$([[ "$ENABLE_AUTO_UPDATE" == "true" ]] && echo "Enabled (mỗi 12h)" || echo "Disabled")${NC}"
+        echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Enabled" || echo "Disabled")${NC}"
         echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
+        echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
+        echo ""
     fi
-    echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
-    echo ""
     
     if [[ "$ENABLE_NEWS_API" == "true" ]]; then
         echo -e "${CYAN}🔧 ĐỔI BEARER TOKEN:${NC}"
         echo -e "  ${WHITE}cd /home/n8n && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=\"NEW_TOKEN\"/' docker-compose.yml && $DOCKER_COMPOSE restart fastapi${NC}"
-        echo ""
-    fi
-    
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        echo -e "${CYAN}🏠 LOCAL MODE NOTES:${NC}"
-        echo -e "  • Không có SSL certificate (chạy trên HTTP)"
-        echo -e "  • Không có auto-update và cron jobs"
-        echo -e "  • Phù hợp cho development và testing"
-        echo -e "  • Để chuyển sang Production Mode, chạy lại script với domain"
         echo ""
     fi
     
@@ -2293,15 +2194,17 @@ main() {
     # Setup swap
     setup_swap
     
-    # Get user input
+    # Get installation mode
     get_installation_mode
+    
+    # Get user input
     get_domain_input
     get_cleanup_option
     get_news_api_config
     get_telegram_config
     get_auto_update_config
     
-    # Verify DNS (skip for local mode)
+    # Verify DNS (only for production mode)
     verify_dns
     
     # Cleanup old installation
@@ -2327,13 +2230,13 @@ main() {
     # Setup Telegram
     setup_telegram_config
     
-    # Setup cron jobs (skip for local mode)
+    # Setup cron jobs
     setup_cron_jobs
     
     # Build and deploy
     build_and_deploy
     
-    # Check SSL and rate limits (skip for local mode)
+    # Check SSL and rate limits (only for production mode)
     check_ssl_rate_limit
     
     # Show final summary
