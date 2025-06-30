@@ -520,11 +520,15 @@ create_project_structure() {
     mkdir -p "$INSTALL_DIR"
     cd "$INSTALL_DIR"
     
-    # Create directories
+    # Create directories with proper permissions
     mkdir -p files/backup_full
     mkdir -p files/temp
     mkdir -p files/youtube_content_anylystic
     mkdir -p logs
+    
+    # Set proper ownership for N8N directories
+    chown -R 1000:1000 files
+    chmod -R 755 files
     
     if [[ "$ENABLE_NEWS_API" == "true" ]]; then
         mkdir -p news_api
@@ -553,7 +557,11 @@ RUN apk add --no-cache \
     wget \
     git \
     build-base \
-    linux-headers
+    linux-headers \
+    shadow
+
+# Create node user with specific UID/GID
+RUN groupmod -g 1000 node && usermod -u 1000 -g 1000 node
 
 # Install yt-dlp
 RUN pip3 install --break-system-packages yt-dlp
@@ -565,13 +573,15 @@ RUN npm install -g puppeteer
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
-# Create directories
+# Create directories with proper permissions
 RUN mkdir -p /home/node/.n8n/nodes
 RUN mkdir -p /data/youtube_content_anylystic
 
 # Set permissions
-RUN chown -R node:node /home/node/.n8n
-RUN chown -R node:node /data
+RUN chown -R 1000:1000 /home/node/.n8n
+RUN chown -R 1000:1000 /data
+RUN chmod -R 755 /home/node/.n8n
+RUN chmod -R 755 /data
 
 USER node
 
@@ -579,6 +589,10 @@ USER node
 RUN npm install n8n-nodes-puppeteer
 
 WORKDIR /data
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5678/healthz || exit 1
 EOF
     
     success "Đã tạo Dockerfile cho N8N"
@@ -1050,6 +1064,10 @@ COPY . .
 # Expose port
 EXPOSE 8000
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 EOF
@@ -1097,6 +1115,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - n8n_network
+    depends_on:
+      caddy:
+        condition: service_healthy
 
   caddy:
     image: caddy:latest
@@ -1111,13 +1132,21 @@ services:
       - caddy_config:/config
     networks:
       - n8n_network
-    depends_on:
-      - n8n
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:2019/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 EOF
 
     if [[ "$ENABLE_NEWS_API" == "true" ]]; then
         cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
-      - fastapi
+    depends_on:
+      caddy:
+        condition: service_healthy
+      fastapi:
+        condition: service_healthy
 
   fastapi:
     build: ./news_api
@@ -1130,6 +1159,12 @@ EOF
       - PYTHONUNBUFFERED=1
     networks:
       - n8n_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 EOF
     fi
 
@@ -1154,10 +1189,15 @@ create_caddyfile() {
 {
     email admin@${DOMAIN}
     acme_ca https://acme-v02.api.letsencrypt.org/directory
+    admin localhost:2019
 }
 
 ${DOMAIN} {
-    reverse_proxy n8n:5678
+    reverse_proxy n8n:5678 {
+        health_uri /healthz
+        health_interval 30s
+        health_timeout 10s
+    }
     
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -1172,6 +1212,13 @@ ${DOMAIN} {
         output file /var/log/caddy/n8n.log
         format json
     }
+    
+    handle_errors {
+        @502 expression {http.error.status_code} == 502
+        handle @502 {
+            respond "N8N service is starting up. Please wait a moment and refresh." 502
+        }
+    }
 }
 EOF
 
@@ -1179,7 +1226,11 @@ EOF
         cat >> "$INSTALL_DIR/Caddyfile" << EOF
 
 ${API_DOMAIN} {
-    reverse_proxy fastapi:8000
+    reverse_proxy fastapi:8000 {
+        health_uri /health
+        health_interval 30s
+        health_timeout 10s
+    }
     
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -1196,6 +1247,13 @@ ${API_DOMAIN} {
     log {
         output file /var/log/caddy/api.log
         format json
+    }
+    
+    handle_errors {
+        @502 expression {http.error.status_code} == 502
+        handle @502 {
+            respond "News API service is starting up. Please wait a moment and refresh." 502
+        }
     }
 }
 EOF
@@ -1574,8 +1632,71 @@ setup_cron_jobs() {
 }
 
 # =============================================================================
-# SSL RATE LIMIT DETECTION
+# SSL RATE LIMIT DETECTION WITH DYNAMIC TIME PARSING
 # =============================================================================
+
+parse_ssl_rate_limit_time() {
+    local logs="$1"
+    local reset_time=""
+    
+    # Try to extract rate limit reset time from various log formats
+    # Format 1: "retry-after" header
+    reset_time=$(echo "$logs" | grep -i "retry-after" | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z' | head -1)
+    
+    # Format 2: "rateLimited" with timestamp
+    if [[ -z "$reset_time" ]]; then
+        reset_time=$(echo "$logs" | grep -i "rateLimited" | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' | head -1)
+    fi
+    
+    # Format 3: "too many certificates" with date
+    if [[ -z "$reset_time" ]]; then
+        reset_time=$(echo "$logs" | grep -i "too many certificates" | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)
+        if [[ -n "$reset_time" ]]; then
+            reset_time="${reset_time}T00:00:00Z"
+        fi
+    fi
+    
+    # Format 4: Extract from ACME error response
+    if [[ -z "$reset_time" ]]; then
+        local rate_limit_json=$(echo "$logs" | grep -o '{"type":".*rateLimited.*"}' | head -1)
+        if [[ -n "$rate_limit_json" ]]; then
+            reset_time=$(echo "$rate_limit_json" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z')
+        fi
+    fi
+    
+    echo "$reset_time"
+}
+
+calculate_reset_time() {
+    local ssl_time="$1"
+    local current_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local reset_time=""
+    
+    if [[ -n "$ssl_time" ]]; then
+        # Parse the SSL time and add 7 days (Let's Encrypt rate limit window)
+        if command -v python3 &> /dev/null; then
+            reset_time=$(python3 -c "
+from datetime import datetime, timedelta
+import sys
+try:
+    ssl_dt = datetime.fromisoformat('${ssl_time}'.replace('Z', '+00:00'))
+    reset_dt = ssl_dt + timedelta(days=7)
+    print(reset_dt.strftime('%Y-%m-%d %H:%M:%S UTC'))
+except:
+    print('')
+")
+        else
+            # Fallback: add 7 days using date command
+            local ssl_epoch=$(date -d "$ssl_time" +%s 2>/dev/null || echo "")
+            if [[ -n "$ssl_epoch" ]]; then
+                local reset_epoch=$((ssl_epoch + 604800)) # 7 days in seconds
+                reset_time=$(date -u -d "@$reset_epoch" "+%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || echo "")
+            fi
+        fi
+    fi
+    
+    echo "$reset_time"
+}
 
 check_ssl_rate_limit() {
     log "🔒 Kiểm tra SSL certificate..."
@@ -1583,25 +1704,32 @@ check_ssl_rate_limit() {
     # Wait for containers to start
     sleep 30
     
-    # Check Caddy logs for rate limit
-    local rate_limit_detected=false
-    
-    if $DOCKER_COMPOSE logs caddy 2>/dev/null | grep -q "rateLimited\|too many certificates"; then
-        rate_limit_detected=true
-    fi
-    
-    if [[ "$rate_limit_detected" == "true" ]]; then
+    # Get Caddy logs
+    local caddy_logs=""
+    if $DOCKER_COMPOSE logs caddy 2>/dev/null | grep -q "rateLimited\|too many certificates\|rate limit"; then
+        caddy_logs=$($DOCKER_COMPOSE logs caddy 2>/dev/null)
+        
         error "🚨 PHÁT HIỆN SSL RATE LIMIT!"
         echo ""
         echo -e "${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
         echo -e "${RED}║${WHITE}                        ⚠️  SSL RATE LIMIT DETECTED                          ${RED}║${NC}"
         echo -e "${RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
         echo ""
+        
+        # Parse SSL rate limit time
+        local ssl_limit_time=$(parse_ssl_rate_limit_time "$caddy_logs")
+        local reset_time=$(calculate_reset_time "$ssl_limit_time")
+        
         echo -e "${YELLOW}🔍 NGUYÊN NHÂN:${NC}"
         echo -e "  • Let's Encrypt giới hạn 5 certificates/domain/tuần"
         echo -e "  • Domain này đã đạt giới hạn miễn phí"
-        echo -e "  • Cần đợi đến tuần sau để cấp SSL mới"
+        if [[ -n "$reset_time" ]]; then
+            echo -e "  • Rate limit sẽ được reset vào: ${WHITE}$reset_time${NC}"
+        else
+            echo -e "  • Không thể xác định thời gian reset chính xác"
+        fi
         echo ""
+        
         echo -e "${YELLOW}💡 GIẢI PHÁP:${NC}"
         echo -e "  ${GREEN}1. CÀI LẠI UBUNTU (KHUYẾN NGHỊ):${NC}"
         echo -e "     • Cài lại Ubuntu Server hoàn toàn"
@@ -1611,11 +1739,26 @@ check_ssl_rate_limit() {
         echo -e "  ${GREEN}2. SỬ DỤNG STAGING SSL (TẠM THỜI):${NC}"
         echo -e "     • Website sẽ hiển thị 'Not Secure' nhưng vẫn hoạt động"
         echo -e "     • Chức năng N8N và API hoạt động đầy đủ"
-        echo -e "     • Có thể chuyển về production SSL sau 29/06/2025"
+        if [[ -n "$reset_time" ]]; then
+            echo -e "     • Có thể chuyển về production SSL sau ${WHITE}$reset_time${NC}"
+        else
+            echo -e "     • Có thể chuyển về production SSL sau khi rate limit reset"
+        fi
         echo ""
-        echo -e "  ${GREEN}3. ĐỢI ĐẾN TUẦN SAU:${NC}"
-        echo -e "     • Đợi đến sau 29/06/2025 13:24 UTC"
+        echo -e "  ${GREEN}3. ĐỢI ĐẾN KHI RATE LIMIT RESET:${NC}"
+        if [[ -n "$reset_time" ]]; then
+            echo -e "     • Đợi đến sau ${WHITE}$reset_time${NC}"
+        else
+            echo -e "     • Đợi khoảng 7 ngày từ lần cấp SSL đầu tiên"
+        fi
         echo -e "     • Chạy lại script để cấp SSL mới"
+        echo ""
+        
+        # Show recent SSL attempts from logs
+        echo -e "${YELLOW}📋 LỊCH SỬ SSL GẦN ĐÂY:${NC}"
+        echo "$caddy_logs" | grep -E "(certificate|rateLimited|too many)" | tail -5 | while read line; do
+            echo -e "  ${WHITE}$line${NC}"
+        done
         echo ""
         
         read -p "🤔 Bạn muốn tiếp tục với Staging SSL? (y/N): " -n 1 -r
@@ -1657,11 +1800,16 @@ setup_staging_ssl() {
 {
     email admin@${DOMAIN}
     acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+    admin localhost:2019
     debug
 }
 
 ${DOMAIN} {
-    reverse_proxy n8n:5678
+    reverse_proxy n8n:5678 {
+        health_uri /healthz
+        health_interval 30s
+        health_timeout 10s
+    }
     
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -1676,6 +1824,13 @@ ${DOMAIN} {
         output file /var/log/caddy/n8n.log
         format json
     }
+    
+    handle_errors {
+        @502 expression {http.error.status_code} == 502
+        handle @502 {
+            respond "N8N service is starting up. Please wait a moment and refresh." 502
+        }
+    }
 }
 EOF
 
@@ -1683,7 +1838,11 @@ EOF
         cat >> "$INSTALL_DIR/Caddyfile" << EOF
 
 ${API_DOMAIN} {
-    reverse_proxy fastapi:8000
+    reverse_proxy fastapi:8000 {
+        health_uri /health
+        health_interval 30s
+        health_timeout 10s
+    }
     
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -1700,6 +1859,13 @@ ${API_DOMAIN} {
     log {
         output file /var/log/caddy/api.log
         format json
+    }
+    
+    handle_errors {
+        @502 expression {http.error.status_code} == 502
+        handle @502 {
+            respond "News API service is starting up. Please wait a moment and refresh." 502
+        }
     }
 }
 EOF
@@ -1721,6 +1887,10 @@ build_and_deploy() {
     
     cd "$INSTALL_DIR"
     
+    # Stop any existing containers first
+    log "🛑 Dừng containers cũ..."
+    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
+    
     # Build images
     log "📦 Build Docker images..."
     $DOCKER_COMPOSE build --no-cache
@@ -1731,16 +1901,51 @@ build_and_deploy() {
     
     # Wait for services
     log "⏳ Đợi services khởi động..."
-    sleep 30
+    sleep 60
     
-    # Check container status
+    # Check container status with health checks
     log "🔍 Kiểm tra trạng thái containers..."
-    if $DOCKER_COMPOSE ps | grep -q "Up"; then
-        success "✅ Containers đã khởi động thành công"
-    else
-        error "❌ Có lỗi khi khởi động containers"
-        $DOCKER_COMPOSE logs
-        exit 1
+    
+    local max_attempts=10
+    local attempt=1
+    
+    while [[ $attempt -le $max_attempts ]]; do
+        local healthy_containers=0
+        local total_containers=0
+        
+        # Count total containers
+        total_containers=$($DOCKER_COMPOSE ps -q | wc -l)
+        
+        # Check each container health
+        for container in $($DOCKER_COMPOSE ps -q); do
+            local health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "no-health-check")
+            if [[ "$health_status" == "healthy" ]] || [[ "$health_status" == "no-health-check" ]]; then
+                ((healthy_containers++))
+            fi
+        done
+        
+        if [[ $healthy_containers -eq $total_containers ]] && [[ $total_containers -gt 0 ]]; then
+            success "✅ Tất cả containers đã khởi động thành công ($healthy_containers/$total_containers)"
+            break
+        else
+            warning "⏳ Đợi containers khởi động... ($healthy_containers/$total_containers healthy) - Attempt $attempt/$max_attempts"
+            sleep 30
+            ((attempt++))
+        fi
+    done
+    
+    if [[ $attempt -gt $max_attempts ]]; then
+        error "❌ Một số containers không khởi động được sau $max_attempts attempts"
+        $DOCKER_COMPOSE logs --tail=20
+        
+        # Try to fix permission issues
+        warning "🔧 Thử fix quyền truy cập..."
+        chown -R 1000:1000 "$INSTALL_DIR/files"
+        chmod -R 755 "$INSTALL_DIR/files"
+        
+        log "🔄 Restart containers sau khi fix permissions..."
+        $DOCKER_COMPOSE restart
+        sleep 30
     fi
 }
 
@@ -1798,18 +2003,34 @@ echo -e "${BLUE}📍 2. Container Status:${NC}"
 $DOCKER_COMPOSE ps
 echo ""
 
-echo -e "${BLUE}📍 3. Docker Images:${NC}"
+echo -e "${BLUE}📍 3. Container Health:${NC}"
+for container in $($DOCKER_COMPOSE ps -q); do
+    local container_name=$(docker inspect --format='{{.Name}}' "$container" | sed 's/\///')
+    local health_status=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "no-health-check")
+    echo "• $container_name: $health_status"
+done
+echo ""
+
+echo -e "${BLUE}📍 4. Docker Images:${NC}"
 docker images | grep -E "(n8n|caddy|news-api)"
 echo ""
 
-echo -e "${BLUE}📍 4. Network Status:${NC}"
+echo -e "${BLUE}📍 5. Network Status:${NC}"
 echo "• Port 80: $(netstat -tulpn | grep :80 | wc -l) connections"
 echo "• Port 443: $(netstat -tulpn | grep :443 | wc -l) connections"
 echo "• Docker Networks:"
 docker network ls | grep n8n
 echo ""
 
-echo -e "${BLUE}📍 5. SSL Certificate Status:${NC}"
+echo -e "${BLUE}📍 6. File Permissions:${NC}"
+echo "• N8N files owner: $(ls -ld /home/n8n/files | awk '{print $3":"$4}')"
+echo "• N8N files permissions: $(ls -ld /home/n8n/files | awk '{print $1}')"
+if [[ -f "/home/n8n/files/database.sqlite" ]]; then
+    echo "• Database file: $(ls -la /home/n8n/files/database.sqlite | awk '{print $1" "$3":"$4}')"
+fi
+echo ""
+
+echo -e "${BLUE}📍 7. SSL Certificate Status:${NC}"
 DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
 if [[ -n "$DOMAIN" ]]; then
     echo "• Domain: $DOMAIN"
@@ -1821,7 +2042,7 @@ else
 fi
 echo ""
 
-echo -e "${BLUE}📍 6. Recent Logs (last 10 lines):${NC}"
+echo -e "${BLUE}📍 8. Recent Logs (last 10 lines):${NC}"
 echo -e "${YELLOW}N8N Logs:${NC}"
 $DOCKER_COMPOSE logs --tail=10 n8n 2>/dev/null || echo "No N8N logs"
 echo ""
@@ -1835,7 +2056,7 @@ if docker ps | grep -q "news-api"; then
     echo ""
 fi
 
-echo -e "${BLUE}📍 7. Backup Status:${NC}"
+echo -e "${BLUE}📍 9. Backup Status:${NC}"
 if [[ -d "/home/n8n/files/backup_full" ]]; then
     BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
     echo "• Backup files: $BACKUP_COUNT"
@@ -1848,16 +2069,18 @@ else
 fi
 echo ""
 
-echo -e "${BLUE}📍 8. Cron Jobs:${NC}"
+echo -e "${BLUE}📍 10. Cron Jobs:${NC}"
 crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
 echo ""
 
 echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
+echo -e "${YELLOW}• Fix permissions:${NC} sudo chown -R 1000:1000 /home/n8n/files && sudo chmod -R 755 /home/n8n/files"
 echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE restart"
 echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
 echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
 echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
 echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
+echo -e "${YELLOW}• Emergency fix 502:${NC} cd /home/n8n && $DOCKER_COMPOSE down && sudo chown -R 1000:1000 files && $DOCKER_COMPOSE up -d --build"
 echo ""
 
 echo -e "${CYAN}✅ Troubleshooting completed!${NC}"
