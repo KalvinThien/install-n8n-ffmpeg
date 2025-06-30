@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025
+# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - PHIÊN BẢN HOÀN CHỈNH V4.1
 # =============================================================================
 # Tác giả: Nguyễn Ngọc Thiện
 # YouTube: https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1
@@ -10,15 +10,15 @@
 # Zalo: 08.8888.4749
 # Cập nhật: 30/06/2025
 #
-# ✨ TÍNH NĂNG MỚI V4 
+# ✨ TÍNH NĂNG MỚI V4.1 
+#   - 🔧 Sửa lỗi ChromeDriver với Chrome for Testing API mới
 #   - 🛡️ Khắc phục lỗi anti-bot protection (Sucuri/Cloudflare) cho News API
 #   - 🤖 Tích hợp Selenium WebDriver với stealth mode
 #   - 🔄 Cải thiện User Agent rotation và session handling 
 #   - 🎭 Thêm browser fingerprint randomization
 #   - 📱 Hỗ trợ mobile user agents cho trang tin tức Việt Nam
 #   - ⚡ Tối ưu performance với connection pooling
-#   - Bổ xung backup qua google drive 
-#   - thêm tính năng restore từ file backup hoặc từ google drive
+#   - 🚧 Fallback method cho ChromeDriver installation
 
 # =============================================================================
 
@@ -61,7 +61,7 @@ RESTORE_FILE_PATH=""
 show_banner() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V3 HOÀN CHỈNH 🚀          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V4.1 HOÀN CHỈNH 🚀         ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} ☁️ Backup & Restore qua Google Drive (rclone)                             ${CYAN}║${NC}"
@@ -840,7 +840,7 @@ create_news_api() {
         return 0
     fi
     
-    log "📰 Tạo News Content API v4.0 (Anti-Bot Protection)..."
+    log "📰 Tạo News Content API v4.1 (Anti-Bot Protection)..."
     
     # Create requirements.txt với selenium và các thư viện stealth
     cat > "$INSTALL_DIR/news_api/requirements.txt" << 'EOF'
@@ -918,9 +918,9 @@ logger = logging.getLogger(__name__)
 
 # FastAPI app
 app = FastAPI(
-    title="News Content API v4.0 - Anti-Bot Protection",
+    title="News Content API v4.1 - Anti-Bot Protection",
     description="Advanced News Content Extraction API với khả năng bypass Sucuri/Cloudflare protection",
-    version="4.0.0",
+    version="4.1.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -1331,108 +1331,139 @@ async def root():
     """API Homepage with documentation"""
     html_content = f"""
     <!DOCTYPE html>
-    <html>
+    <html lang="vi">
     <head>
-        <title>News Content API v4.0 - Anti-Bot Protection</title>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>News Content API v4.1 - Anti-Bot Protection - by Nguyễn Ngọc Thiện</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }}
-            .container {{ max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); }}
-            h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
-            h2 {{ color: #34495e; margin-top: 30px; }}
-            .endpoint {{ background: #ecf0f1; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #3498db; }}
-            .method {{ background: #3498db; color: white; padding: 3px 8px; border-radius: 3px; font-size: 12px; }}
-            .auth-info {{ background: #e74c3c; color: white; padding: 15px; border-radius: 8px; margin: 20px 0; }}
-            .new-features {{ background: #27ae60; color: white; padding: 15px; border-radius: 8px; margin: 20px 0; }}
-            .bypass-methods {{ background: #f39c12; color: white; padding: 15px; border-radius: 8px; margin: 20px 0; }}
-            code {{ background: #2c3e50; color: #ecf0f1; padding: 2px 5px; border-radius: 3px; }}
-            pre {{ background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 8px; overflow-x: auto; }}
-            .feature {{ background: #27ae60; color: white; padding: 10px; border-radius: 5px; margin: 5px 0; }}
-            .author-info {{ background: #8e44ad; color: white; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center; }}
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #333; line-height: 1.6; }
+            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+            .header { text-align: center; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px 20px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37); border: 1px solid rgba(255, 255, 255, 0.18); }
+            .header h1 { color: #fff; font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+            .header p { color: #f0f0f0; font-size: 1.2em; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+            .card { background: rgba(255, 255, 255, 0.95); border-radius: 15px; padding: 25px; box-shadow: 0 8px 25px rgba(0,0,0,0.1); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+            .card:hover { transform: translateY(-5px); box-shadow: 0 15px 35px rgba(0,0,0,0.2); }
+            .card h3 { color: #2c3e50; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+            .card .emoji { font-size: 1.5em; }
+            .author-info { background: linear-gradient(45deg, #667eea, #764ba2); color: white; border-radius: 15px; padding: 25px; text-align: center; margin-top: 30px; }
+            .author-info h3 { margin-bottom: 15px; }
+            .social-links { display: flex; justify-content: center; gap: 15px; flex-wrap: wrap; margin-top: 15px; }
+            .social-links a { background: rgba(255,255,255,0.2); color: white; padding: 10px 20px; border-radius: 25px; text-decoration: none; transition: all 0.3s ease; }
+            .social-links a:hover { background: rgba(255,255,255,0.3); transform: scale(1.05); }
+            .update-log { background: #e8f5e8; border-left: 5px solid #28a745; padding: 20px; border-radius: 10px; margin-top: 20px; }
+            .update-log h4 { color: #155724; margin-bottom: 10px; }
+            .update-log ul { margin-left: 20px; }
+            .update-log li { color: #155724; margin-bottom: 5px; }
+            @media (max-width: 768px) { .header h1 { font-size: 2em; } .grid { grid-template-columns: 1fr; } .social-links { flex-direction: column; align-items: center; } }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🚀 News Content API v4.0 - Anti-Bot Protection</h1>
-            <p>Advanced News Content Extraction API với khả năng <strong>bypass Sucuri/Cloudflare protection</strong></p>
-            
-            <div class="new-features">
-                <h3>🆕 TÍNH NĂNG MỚI V4.0</h3>
-                <p>✅ <strong>Khắc phục lỗi 307 Sucuri CloudProxy</strong></p>
-                <p>✅ <strong>Multi-method bypass</strong>: 5 phương pháp khác nhau</p>
-                <p>✅ <strong>Selenium WebDriver</strong> với stealth mode</p>
-                <p>✅ <strong>Mobile User Agents</strong> tối ưu cho VN</p>
-                <p>✅ <strong>Smart retry logic</strong> với exponential backoff</p>
+            <div class="header">
+                <h1>🚀 News Content API v4.1 - Anti-Bot Protection</h1>
+                <p>Advanced News Content Extraction API với khả năng bypass Sucuri/Cloudflare protection</p>
             </div>
             
-            <div class="bypass-methods">
-                <h3>🛡️ PHƯƠNG PHÁP BYPASS</h3>
-                <p><strong>1. Requests</strong> - Headers tối ưu + session pooling</p>
-                <p><strong>2. CloudScraper</strong> - JavaScript challenge solver</p>
-                <p><strong>3. curl-cffi</strong> - Chrome browser impersonation</p>
-                <p><strong>4. requests-html</strong> - JavaScript rendering</p>
-                <p><strong>5. Selenium</strong> - Full browser automation (undetected)</p>
+            <div class="grid">
+                <div class="card">
+                    <h3><span class="emoji">🛡️</span>Bypass Protection</h3>
+                    <ul>
+                        <li>✅ Sucuri CloudProxy bypass</li>
+                        <li>✅ Cloudflare protection</li>
+                        <li>✅ JavaScript challenge solver</li>
+                        <li>✅ Browser impersonation</li>
+                        <li>✅ Mobile user agents VN</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3><span class="emoji">🔧</span>V4.1 Updates</h3>
+                    <ul>
+                        <li>🔧 Fixed ChromeDriver API</li>
+                        <li>🚧 Chrome for Testing API</li>
+                        <li>🛡️ Fallback installation</li>
+                        <li>⚡ Improved stability</li>
+                        <li>🐞 Bug fixes</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3><span class="emoji">🚀</span>5 Bypass Methods</h3>
+                    <ol>
+                        <li><strong>Requests</strong> - Smart headers</li>
+                        <li><strong>CloudScraper</strong> - JS challenges</li>
+                        <li><strong>curl-cffi</strong> - Chrome impersonation</li>
+                        <li><strong>requests-html</strong> - JS rendering</li>
+                        <li><strong>Selenium</strong> - Full browser</li>
+                    </ol>
+                </div>
+                
+                <div class="card">
+                    <h3><span class="emoji">📰</span>VN News Sites</h3>
+                    <ul>
+                        <li>✅ VnExpress.net</li>
+                        <li>✅ Dantri.com.vn</li>
+                        <li>✅ Tuoitre.vn</li>
+                        <li>✅ Thanhnien.vn</li>
+                        <li>✅ Và nhiều site khác</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3><span class="emoji">🔐</span>API Authentication</h3>
+                    <p>Tất cả endpoints yêu cầu Bearer Token:</p>
+                    <code style="background: #2c3e50; color: #ecf0f1; padding: 8px; border-radius: 5px; display: block; margin-top: 10px;">
+                        Authorization: Bearer YOUR_TOKEN
+                    </code>
+                </div>
+                
+                <div class="card">
+                    <h3><span class="emoji">📚</span>API Endpoints</h3>
+                    <ul>
+                        <li><strong>GET /health</strong> - Kiểm tra API</li>
+                        <li><strong>POST /extract-article</strong> - Cào bài viết</li>
+                        <li><strong>POST /extract-source</strong> - Cào nhiều bài</li>
+                        <li><strong>POST /extract-feed</strong> - Cào RSS feed</li>
+                    </ul>
+                    <p style="margin-top: 15px;">
+                        <a href="/docs" target="_blank" style="color: #667eea; text-decoration: none;">📚 Swagger UI</a> | 
+                        <a href="/redoc" target="_blank" style="color: #667eea; text-decoration: none;">📖 ReDoc</a>
+                    </p>
+                </div>
             </div>
-            
-            <div class="auth-info">
-                <h3>🔐 Authentication Required</h3>
-                <p>Tất cả API calls yêu cầu Bearer Token trong header:</p>
-                <code>Authorization: Bearer YOUR_TOKEN_HERE</code>
-            </div>
-            
-            <h2>✨ Tính Năng</h2>
-            <div class="feature">🛡️ Bypass Sucuri/Cloudflare/CloudProxy protection</div>
-            <div class="feature">📰 Cào nội dung từ VnExpress, Dân Trí, Tuổi Trẻ, v.v.</div>
-            <div class="feature">📱 Mobile-optimized User Agents cho trang tin tức VN</div>
-            <div class="feature">🤖 Selenium stealth mode không bị phát hiện</div>
-            <div class="feature">🔄 Smart retry với 5 phương pháp khác nhau</div>
-            <div class="feature">⚡ Connection pooling cho performance tốt</div>
-            
-            <h2>📖 API Endpoints</h2>
-            
-            <div class="endpoint">
-                <span class="method">GET</span> <strong>/health</strong>
-                <p>Kiểm tra trạng thái API</p>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span> <strong>/extract-article</strong>
-                <p>Lấy nội dung bài viết từ URL (với anti-bot bypass)</p>
-                <pre>{{"url": "https://vnexpress.net/your-article-url", "language": "vi", "extract_images": true}}</pre>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">POST</span> <strong>/extract-source</strong>
-                <p>Cào nhiều bài viết từ website (bypass protection)</p>
-                <pre>{{"url": "https://vnexpress.net", "max_articles": 10, "language": "vi"}}</pre>
-            </div>
-            
-            <h2>🔗 Documentation</h2>
-            <p>
-                <a href="/docs" target="_blank">📚 Swagger UI</a> | 
-                <a href="/redoc" target="_blank">📖 ReDoc</a>
-            </p>
-            
-            <h2>💻 Ví Dụ Sử Dụng</h2>
-            <pre>curl -X POST "https://api.yourdomain.com/extract-article" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer YOUR_TOKEN" \\
-     -d '{{"url": "https://vnexpress.net/trung-tam-trien-lam-lon-nhat-dong-nam-a-san-sang-hoat-dong-4907516.html", "language": "vi"}}'</pre>
             
             <div class="author-info">
-                <h3>👨‍💻 Tác Giả</h3>
-                <p><strong>Nguyễn Ngọc Thiện</strong></p>
-                <p>📺 YouTube: <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank" style="color: #fff;">@kalvinthiensocial</a></p>
-                <p>📱 Zalo: 08.8888.4749</p>
-                <p>📘 Facebook: <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank" style="color: #fff;">@Ban.Thien.Handsome</a></p>
-                <p>🎬 <strong>Đăng ký kênh để ủng hộ mình nhé!</strong> 🔔</p>
+                <h3>👨‍💻 Tác Giả - Nguyễn Ngọc Thiện</h3>
+                <p>🚀 Chuyên gia N8N Automation & Web Scraping</p>
+                <div class="social-links">
+                    <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank">📺 YouTube</a>
+                    <a href="https://www.youtube.com/@kalvinthiensocial/playlists" target="_blank">🎬 N8N Playlist</a>
+                    <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank">📘 Facebook</a>
+                    <a href="tel:0888884749">📱 Zalo: 08.8888.4749</a>
+                </div>
+                <p style="margin-top: 15px; font-size: 0.9em; opacity: 0.9;">
+                    🎯 Hãy đăng ký kênh YouTube để ủng hộ và nhận thông báo video mới nhất về N8N! 🔔
+                </p>
+                
+                <div class="update-log">
+                    <h4>📅 Update Log V4.1 - 30/06/2025</h4>
+                    <ul>
+                        <li>🔧 Fixed ChromeDriver installation error với Chrome for Testing API</li>
+                        <li>🚧 Added fallback method sử dụng apt chromium-chromedriver</li>
+                        <li>⚡ Improved Docker build stability</li>
+                        <li>🐞 Bug fixes for anti-bot protection</li>
+                        <li>📊 Enhanced error logging and debugging</li>
+                    </ul>
+                </div>
             </div>
         </div>
     </body>
     </html>
-    """
-    return html_content
+      """
+      return html_content
 
 @app.get("/health")
 async def health_check():
@@ -1440,7 +1471,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now(),
-        "version": "4.0.0",
+        "version": "4.1.0",
         "features": [
             "Anti-bot protection bypass",
             "Sucuri CloudProxy bypass", 
@@ -1599,12 +1630,27 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver
-RUN CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+') \
-    && wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/$(curl -s https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_VERSION%%.*})/chromedriver_linux64.zip \
-    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
-    && rm /tmp/chromedriver.zip \
-    && chmod +x /usr/local/bin/chromedriver
+# Install ChromeDriver với Chrome for Testing API mới + fallback method
+RUN CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+' | head -1) \
+    && CHROME_MAJOR_VERSION=$(echo $CHROME_VERSION | cut -d. -f1) \
+    && echo "Chrome version: $CHROME_VERSION, Major: $CHROME_MAJOR_VERSION" \
+    && LATEST_RELEASE=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_$CHROME_MAJOR_VERSION" || echo "") \
+    && if [ -n "$LATEST_RELEASE" ] && [ "$LATEST_RELEASE" != "" ]; then \
+        echo "Latest ChromeDriver release for Chrome $CHROME_MAJOR_VERSION: $LATEST_RELEASE" \
+        && wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/$LATEST_RELEASE/linux64/chromedriver-linux64.zip" \
+        && unzip /tmp/chromedriver.zip -d /tmp/ \
+        && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
+        && rm -rf /tmp/chromedriver.zip /tmp/chromedriver-linux64 \
+        && chmod +x /usr/local/bin/chromedriver \
+        && echo "✅ ChromeDriver installed via Chrome for Testing API"; \
+    else \
+        echo "⚠️ Chrome for Testing API failed, using apt chromium-chromedriver as fallback" \
+        && apt-get update \
+        && apt-get install -y chromium-chromedriver \
+        && ln -sf /usr/bin/chromedriver /usr/local/bin/chromedriver \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && chromedriver --version
 
 # Copy requirements và install Python dependencies
 COPY requirements.txt .
