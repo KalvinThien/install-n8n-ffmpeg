@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - PHIÊN BẢN HOÀN CHỈNH V3
+# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 
 # =============================================================================
 # Tác giả: Nguyễn Ngọc Thiện
 # YouTube: https://www.youtube.com/@kalvinthiensocial
@@ -833,13 +833,13 @@ create_news_api() {
         return 0
     fi
     
-    log "📰 Tạo News Content API với Cloudflare Bypass..."
+    log "📰 Tạo News Content API..."
     
-    # Create requirements.txt với newspaper4k latest version
+    # Create requirements.txt
     cat > "$INSTALL_DIR/news_api/requirements.txt" << 'EOF'
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-newspaper4k
+newspaper4k==0.9.3
 user-agents==2.2.0
 pydantic==2.5.0
 python-multipart==0.0.6
@@ -850,34 +850,18 @@ nltk==3.8.1
 beautifulsoup4==4.12.2
 feedparser==6.0.10
 python-dateutil==2.8.2
-cloudscraper==1.2.71
-fake-useragent==1.4.0
-retrying==1.3.4
-httpx==0.25.2
-selenium==4.15.2
-undetected-chromedriver==3.5.4
-webdriver-manager==4.0.1
-requests-html==0.10.0
-pyppeteer==1.0.2
-playwright==1.40.0
-curl-cffi==0.5.10
-tls-client==0.2.1
 EOF
     
-    # Create main.py với Cloudflare bypass
+    # Create main.py
     cat > "$INSTALL_DIR/news_api/main.py" << 'EOF'
 import os
 import random
 import logging
-import time
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Optional, Dict, Any
 import feedparser
 import requests
-import cloudscraper
-import httpx
-from fastapi import FastAPI, HTTPException, Depends, Security, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -885,23 +869,7 @@ from pydantic import BaseModel, HttpUrl, Field
 import newspaper
 from newspaper import Article, Source
 from user_agents import parse
-from fake_useragent import UserAgent
-from retrying import retry
 import nltk
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-import undetected_chromedriver as uc
-from requests_html import HTMLSession
-try:
-    import curl_cffi
-    from curl_cffi import requests as cf_requests
-    CURL_CFFI_AVAILABLE = True
-except ImportError:
-    CURL_CFFI_AVAILABLE = False
 
 # Download required NLTK data
 try:
@@ -914,14 +882,11 @@ except:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize User Agent
-ua = UserAgent()
-
 # FastAPI app
 app = FastAPI(
-    title="News Content API with Cloudflare Bypass",
-    description="Advanced News Content Extraction API with Newspaper4k & Cloudflare Bypass",
-    version="3.0.0",
+    title="News Content API",
+    description="Advanced News Content Extraction API with Newspaper4k",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -939,195 +904,21 @@ app.add_middleware(
 security = HTTPBearer()
 NEWS_API_TOKEN = os.getenv("NEWS_API_TOKEN", "default_token")
 
-# Session management
-session_cache = {}
-scraper_session = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'mobile': False
-    },
-    delay=10,
-    captcha={
-        'provider': 'return_response'
-    }
-)
-
-# Enhanced User Agents với real browser signatures
-ENHANCED_USER_AGENTS = [
-    # Chrome Windows
+# Random User Agents
+USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-    # Chrome macOS
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-    # Firefox
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0",
-    # Edge
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-    # Safari
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
 ]
 
-# Stealth headers
-def get_stealth_headers():
-    """Tạo headers stealth để bypass detection"""
-    return {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-User': '?1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
-        'Cache-Control': 'max-age=0',
-    }
-
 def get_random_user_agent() -> str:
-    """Lấy random user agent từ fake_useragent hoặc danh sách"""
-    try:
-        return ua.random
-    except:
-        return random.choice(ENHANCED_USER_AGENTS)
-
-def get_session_for_domain(domain: str):
-    """Lấy hoặc tạo session cho domain cụ thể"""
-    if domain not in session_cache:
-        session_cache[domain] = {
-            'session': requests.Session(),
-            'created': datetime.now(),
-            'cookies': {}
-        }
-        
-        # Cấu hình session
-        session = session_cache[domain]['session']
-        session.headers.update(get_stealth_headers())
-        session.headers['User-Agent'] = get_random_user_agent()
-        
-        # Thêm timeout
-        session.timeout = 30
-        
-    return session_cache[domain]['session']
-
-def clean_old_sessions():
-    """Dọn dẹp session cũ"""
-    current_time = datetime.now()
-    expired_domains = []
-    
-    for domain, session_data in session_cache.items():
-        if current_time - session_data['created'] > timedelta(hours=1):
-            expired_domains.append(domain)
-    
-    for domain in expired_domains:
-        session_cache[domain]['session'].close()
-        del session_cache[domain]
-
-@retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
-def fetch_with_cloudflare_bypass(url: str, use_selenium: bool = False) -> str:
-    """Fetch content với multiple bypass methods"""
-    domain = url.split('/')[2]
-    
-    # Method 1: Cloudscraper
-    try:
-        logger.info(f"Attempting cloudscraper for: {url}")
-        response = scraper_session.get(url, timeout=30)
-        if response.status_code == 200 and len(response.text) > 1000:
-            logger.info(f"Cloudscraper success for: {url}")
-            return response.text
-    except Exception as e:
-        logger.warning(f"Cloudscraper failed for {url}: {e}")
-    
-    # Method 2: curl-cffi (if available)
-    if CURL_CFFI_AVAILABLE:
-        try:
-            logger.info(f"Attempting curl-cffi for: {url}")
-            response = cf_requests.get(
-                url,
-                impersonate="chrome120",
-                timeout=30,
-                headers=get_stealth_headers()
-            )
-            if response.status_code == 200 and len(response.text) > 1000:
-                logger.info(f"curl-cffi success for: {url}")
-                return response.text
-        except Exception as e:
-            logger.warning(f"curl-cffi failed for {url}: {e}")
-    
-    # Method 3: Session với retry
-    try:
-        logger.info(f"Attempting session retry for: {url}")
-        session = get_session_for_domain(domain)
-        
-        # Thêm random delay
-        time.sleep(random.uniform(1, 3))
-        
-        response = session.get(url, timeout=30)
-        if response.status_code == 200:
-            logger.info(f"Session success for: {url}")
-            return response.text
-        elif response.status_code == 307:
-            # Handle redirect
-            if 'location' in response.headers:
-                redirect_url = response.headers['location']
-                logger.info(f"Following redirect to: {redirect_url}")
-                response = session.get(redirect_url, timeout=30)
-                if response.status_code == 200:
-                    return response.text
-    except Exception as e:
-        logger.warning(f"Session retry failed for {url}: {e}")
-    
-    # Method 4: Selenium (last resort)
-    if use_selenium:
-        try:
-            logger.info(f"Attempting Selenium for: {url}")
-            return fetch_with_selenium(url)
-        except Exception as e:
-            logger.warning(f"Selenium failed for {url}: {e}")
-    
-    raise Exception(f"All methods failed for {url}")
-
-def fetch_with_selenium(url: str) -> str:
-    """Fetch content bằng Selenium với undetected-chromedriver"""
-    options = uc.ChromeOptions()
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-features=VizDisplayCompositor')
-    options.add_argument('--headless')
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    
-    driver = None
-    try:
-        driver = uc.Chrome(options=options)
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        driver.get(url)
-        
-        # Đợi page load
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        
-        # Đợi thêm để JavaScript challenge resolve
-        time.sleep(5)
-        
-        # Lấy content
-        content = driver.page_source
-        return content
-        
-    finally:
-        if driver:
-            driver.quit()
+    """Get a random user agent string"""
+    return random.choice(USER_AGENTS)
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Verify Bearer token"""
@@ -1141,17 +932,14 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
 # Pydantic models
 class ArticleRequest(BaseModel):
     url: HttpUrl
-    language: str = Field(default="vi", description="Language code (en, vi, zh, etc.)")
+    language: str = Field(default="en", description="Language code (en, vi, zh, etc.)")
     extract_images: bool = Field(default=True, description="Extract images from article")
     summarize: bool = Field(default=False, description="Generate article summary")
-    use_selenium: bool = Field(default=False, description="Force use Selenium for Cloudflare bypass")
-    use_proxy: bool = Field(default=False, description="Use proxy for request")
 
 class SourceRequest(BaseModel):
     url: HttpUrl
     max_articles: int = Field(default=10, ge=1, le=50, description="Maximum articles to extract")
-    language: str = Field(default="vi", description="Language code")
-    use_selenium: bool = Field(default=False, description="Force use Selenium")
+    language: str = Field(default="en", description="Language code")
 
 class FeedRequest(BaseModel):
     url: HttpUrl
@@ -1170,15 +958,12 @@ class ArticleResponse(BaseModel):
     word_count: int
     read_time_minutes: int
     url: str
-    extraction_method: str
-    bypass_used: bool
 
 class SourceResponse(BaseModel):
     source_url: str
     articles: List[ArticleResponse]
     total_articles: int
     categories: List[str]
-    extraction_stats: Dict[str, int]
 
 class FeedResponse(BaseModel):
     feed_url: str
@@ -1187,89 +972,51 @@ class FeedResponse(BaseModel):
     total_articles: int
 
 # Helper functions
-def create_newspaper_config(language: str = "vi") -> newspaper.Config:
-    """Tạo newspaper configuration với bypass capabilities"""
+def create_newspaper_config(language: str = "en") -> newspaper.Config:
+    """Create newspaper configuration with random user agent"""
     config = newspaper.Config()
     config.language = language
     config.browser_user_agent = get_random_user_agent()
     config.request_timeout = 30
     config.number_threads = 1
     config.thread_timeout_seconds = 30
-    config.keep_article_html = True
-    config.fetch_images = True
     config.ignored_content_types_defaults = {
         'application/pdf', 'application/x-pdf', 'application/x-bzpdf',
         'application/x-gzpdf', 'application/msword', 'doc', 'text/plain'
     }
-    
-    # Thêm headers cho bypass
-    config.headers = get_stealth_headers()
-    config.headers['User-Agent'] = config.browser_user_agent
-    
     return config
 
-def extract_article_content(
-    url: str, 
-    language: str = "vi", 
-    extract_images: bool = True, 
-    summarize: bool = False,
-    use_selenium: bool = False
-) -> ArticleResponse:
-    """Trích xuất nội dung bài viết với Cloudflare bypass"""
-    extraction_method = "standard"
-    bypass_used = False
-    
+def extract_article_content(url: str, language: str = "en", extract_images: bool = True, summarize: bool = False) -> ArticleResponse:
+    """Extract content from a single article"""
     try:
-        # Thử method tiêu chuẩn trước
         config = create_newspaper_config(language)
         article = Article(url, config=config)
         
-        try:
-            article.download()
-            article.parse()
-            
-            # Kiểm tra xem có bị Cloudflare block không
-            if not article.text or len(article.text) < 100 or "Cloudflare" in article.html:
-                raise Exception("Possible Cloudflare protection detected")
-                
-        except Exception as e:
-            logger.warning(f"Standard extraction failed for {url}: {e}")
-            
-            # Sử dụng bypass methods
-            bypass_used = True
-            html_content = fetch_with_cloudflare_bypass(url, use_selenium)
-            
-            # Parse với newspaper từ HTML content
-            article = Article(url, config=config)
-            article.set_html(html_content)
-            article.parse()
-            
-            extraction_method = "cloudflare_bypass"
-            
-            if use_selenium:
-                extraction_method = "selenium_bypass"
+        # Download and parse
+        article.download()
+        article.parse()
         
-        # Extract keywords và summary
+        # Extract keywords and summary if requested
         keywords = []
         summary = None
         
         if article.text:
             try:
                 article.nlp()
-                keywords = article.keywords[:10]
+                keywords = article.keywords[:10]  # Limit to 10 keywords
                 if summarize:
                     summary = article.summary
             except Exception as e:
                 logger.warning(f"NLP processing failed for {url}: {e}")
         
-        # Tính toán thời gian đọc
+        # Calculate read time (average 200 words per minute)
         word_count = len(article.text.split()) if article.text else 0
         read_time = max(1, round(word_count / 200))
         
-        # Trích xuất hình ảnh
+        # Extract images
         images = []
         if extract_images:
-            images = list(article.images)[:10]
+            images = list(article.images)[:10]  # Limit to 10 images
         
         return ArticleResponse(
             title=article.title or "No title",
@@ -1283,119 +1030,111 @@ def extract_article_content(
             language=language,
             word_count=word_count,
             read_time_minutes=read_time,
-            url=url,
-            extraction_method=extraction_method,
-            bypass_used=bypass_used
+            url=url
         )
         
     except Exception as e:
         logger.error(f"Error extracting article {url}: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to extract article: {str(e)}")
 
-# Background task to clean sessions
-@app.on_event("startup")
-async def startup_event():
-    """Khởi động background tasks"""
-    logger.info("News API started with Cloudflare bypass capabilities")
-
 # API Routes
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """API Homepage với thông tin bypass"""
+    """API Homepage with documentation"""
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>News Content API - Cloudflare Bypass</title>
+        <title>News Content API</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
             h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
             h2 {{ color: #34495e; margin-top: 30px; }}
             .endpoint {{ background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 10px 0; }}
             .method {{ background: #3498db; color: white; padding: 3px 8px; border-radius: 3px; font-size: 12px; }}
             .auth-info {{ background: #e74c3c; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-            .bypass-info {{ background: #27ae60; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }}
             .token-change {{ background: #f39c12; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; }}
             code {{ background: #2c3e50; color: #ecf0f1; padding: 2px 5px; border-radius: 3px; }}
             pre {{ background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; }}
-            .feature {{ background: #3498db; color: white; padding: 10px; border-radius: 5px; margin: 5px 0; }}
-            .author {{ background: #9b59b6; color: white; padding: 15px; border-radius: 5px; margin: 20px 0; text-align: center; }}
+            .feature {{ background: #27ae60; color: white; padding: 10px; border-radius: 5px; margin: 5px 0; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🚀 News Content API v3.0 - Cloudflare Bypass</h1>
-            <p>Advanced News Content Extraction API với <strong>Newspaper4k</strong> và <strong>Cloudflare Bypass</strong></p>
-            
-            <div class="author">
-                <h3>👨‍💻 Tác giả: Nguyễn Ngọc Thiện</h3>
-                <p>📺 <strong>Đăng ký kênh YouTube để ủng hộ:</strong> <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1" target="_blank" style="color: #ffeb3b;">Kalvin Thien Social</a></p>
-                <p>📱 <strong>Zalo:</strong> 08.8888.4749 | 📘 <strong>Facebook:</strong> <a href="https://www.facebook.com/Ban.Thien.Handsome/" target="_blank" style="color: #ffeb3b;">Ban.Thien.Handsome</a></p>
-                <p>🎬 <strong>N8N Playlist:</strong> <a href="https://www.youtube.com/@kalvinthiensocial/playlists" target="_blank" style="color: #ffeb3b;">N8N Tutorials</a></p>
-            </div>
-            
-            <div class="bypass-info">
-                <h3>🛡️ Cloudflare Bypass Capabilities</h3>
-                <p><strong>Hỗ trợ bypass:</strong> Cloudflare, Sucuri, DDoS-Guard, và các protection khác</p>
-                <p><strong>Methods:</strong> Cloudscraper, curl-cffi, Session Management, Selenium WebDriver</p>
-                <p><strong>Đặc biệt:</strong> Tối ưu cho website Việt Nam như VnExpress, Dantri, Thanhnien...</p>
-            </div>
+            <h1>🚀 News Content API v2.0</h1>
+            <p>Advanced News Content Extraction API với <strong>Newspaper4k</strong> và <strong>Random User Agents</strong></p>
             
             <div class="auth-info">
                 <h3>🔐 Authentication Required</h3>
                 <p>Tất cả API calls yêu cầu Bearer Token trong header:</p>
                 <code>Authorization: Bearer YOUR_TOKEN_HERE</code>
+                <p><strong>Lưu ý:</strong> Token đã được đặt trong quá trình cài đặt và không hiển thị ở đây vì lý do bảo mật.</p>
+            </div>
+
+            <div class="token-change">
+                <h3>🔧 Đổi Bearer Token</h3>
+                <p><strong>Cách 1:</strong> One-liner command</p>
+                <pre>cd /home/n8n && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN="NEW_TOKEN"/' docker-compose.yml && docker compose restart fastapi</pre>
+                
+                <p><strong>Cách 2:</strong> Edit file trực tiếp</p>
+                <pre>nano /home/n8n/docker-compose.yml
+# Tìm dòng NEWS_API_TOKEN và thay đổi
+docker compose restart fastapi</pre>
             </div>
             
-            <h2>✨ Tính Năng Mới</h2>
-            <div class="feature">🛡️ Bypass Cloudflare, Sucuri, DDoS-Guard tự động</div>
-            <div class="feature">🔄 Multiple extraction methods với fallback</div>
-            <div class="feature">📰 Newspaper4k phiên bản mới nhất (không cố định version)</div>
-            <div class="feature">🎭 Enhanced User Agents với browser signatures</div>
-            <div class="feature">🍪 Session management và cookie persistence</div>
-            <div class="feature">⚡ Selenium WebDriver cho cases khó</div>
-            <div class="feature">🌍 Tối ưu cho website Việt Nam</div>
-            <div class="feature">📊 Extraction statistics và bypass reporting</div>
+            <h2>✨ Tính Năng</h2>
+            <div class="feature">📰 Cào nội dung bài viết từ bất kỳ website nào</div>
+            <div class="feature">📡 Parse RSS feeds để lấy tin tức mới nhất</div>
+            <div class="feature">🔍 Tìm kiếm và phân tích nội dung tự động</div>
+            <div class="feature">🌍 Hỗ trợ 80+ ngôn ngữ (Việt, Anh, Trung, Nhật...)</div>
+            <div class="feature">🎭 Random User Agents để tránh bị block</div>
+            <div class="feature">🤖 Tích hợp trực tiếp vào N8N workflows</div>
             
             <h2>📖 API Endpoints</h2>
             
             <div class="endpoint">
                 <span class="method">GET</span> <strong>/health</strong>
-                <p>Kiểm tra trạng thái API và bypass capabilities</p>
+                <p>Kiểm tra trạng thái API</p>
             </div>
             
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/extract-article</strong>
-                <p>Lấy nội dung bài viết từ URL với Cloudflare bypass</p>
-                <pre>{{"url": "https://vnexpress.net/article-url", "language": "vi", "use_selenium": false}}</pre>
+                <p>Lấy nội dung bài viết từ URL</p>
+                <pre>{{"url": "https://example.com/article", "language": "vi", "extract_images": true, "summarize": true}}</pre>
             </div>
             
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/extract-source</strong>
-                <p>Cào nhiều bài viết từ website với bypass</p>
-                <pre>{{"url": "https://dantri.com.vn", "max_articles": 10, "language": "vi", "use_selenium": false}}</pre>
+                <p>Cào nhiều bài viết từ website</p>
+                <pre>{{"url": "https://dantri.com.vn", "max_articles": 10, "language": "vi"}}</pre>
             </div>
             
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/parse-feed</strong>
                 <p>Phân tích RSS feeds</p>
-                <pre>{{"url": "https://vnexpress.net/rss", "max_articles": 10}}</pre>
+                <pre>{{"url": "https://dantri.com.vn/rss.xml", "max_articles": 10}}</pre>
             </div>
             
-            <h2>💻 Ví Dụ VnExpress</h2>
+            <h2>🔗 Documentation</h2>
+            <p>
+                <a href="/docs" target="_blank">📚 Swagger UI</a> | 
+                <a href="/redoc" target="_blank">📖 ReDoc</a>
+            </p>
+            
+            <h2>💻 Ví Dụ cURL</h2>
             <pre>curl -X POST "https://api.yourdomain.com/extract-article" \\
      -H "Content-Type: application/json" \\
      -H "Authorization: Bearer YOUR_TOKEN" \\
-     -d '{{"url": "https://vnexpress.net/some-article", "language": "vi", "use_selenium": false}}'</pre>
+     -d '{{"url": "https://dantri.com.vn/the-gioi.htm", "language": "vi"}}'</pre>
             
             <hr style="margin: 30px 0;">
             <p style="text-align: center; color: #7f8c8d;">
-                🛡️ Powered by <strong>Cloudscraper + Selenium</strong> | 
+                🚀 Powered by <strong>Newspaper4k</strong> | 
                 👨‍💻 Created by <strong>Nguyễn Ngọc Thiện</strong> | 
-                📺 <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1">Đăng ký kênh YouTube</a>
+                📺 <a href="https://www.youtube.com/@kalvinthiensocial">YouTube Channel</a>
             </p>
         </div>
     </body>
@@ -1405,112 +1144,72 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check với bypass capabilities"""
+    """Health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": datetime.now(),
-        "version": "3.0.0",
-        "author": "Nguyễn Ngọc Thiện",
-        "youtube": "https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1",
+        "version": "2.0.0",
         "features": [
-            "Cloudflare bypass",
-            "Sucuri bypass", 
             "Article extraction",
-            "Source crawling",
+            "Source crawling", 
             "RSS feed parsing",
             "Multi-language support",
-            "Enhanced User Agents",
-            "Session management",
-            "Selenium WebDriver",
-            "Vietnamese websites optimized"
-        ],
-        "bypass_methods": [
-            "Cloudscraper",
-            "curl-cffi",
-            "Session management",
-            "Selenium WebDriver",
-            "Undetected Chrome"
-        ],
-        "curl_cffi_available": CURL_CFFI_AVAILABLE
+            "Random User Agents",
+            "Image extraction",
+            "Keyword extraction",
+            "Content summarization"
+        ]
     }
 
 @app.post("/extract-article", response_model=ArticleResponse)
 async def extract_article(
     request: ArticleRequest,
-    background_tasks: BackgroundTasks,
     token: str = Depends(verify_token)
 ):
-    """Trích xuất nội dung bài viết với Cloudflare bypass"""
-    logger.info(f"Extracting article with bypass: {request.url}")
-    
-    # Schedule session cleanup
-    background_tasks.add_task(clean_old_sessions)
-    
+    """Extract content from a single article URL"""
+    logger.info(f"Extracting article: {request.url}")
     return extract_article_content(
         str(request.url),
         request.language,
         request.extract_images,
-        request.summarize,
-        request.use_selenium
+        request.summarize
     )
 
 @app.post("/extract-source", response_model=SourceResponse)
 async def extract_source(
     request: SourceRequest,
-    background_tasks: BackgroundTasks,
     token: str = Depends(verify_token)
 ):
-    """Trích xuất nhiều bài viết từ nguồn với bypass"""
+    """Extract multiple articles from a news source"""
     try:
-        logger.info(f"Extracting source with bypass: {request.url}")
-        
-        # Schedule session cleanup
-        background_tasks.add_task(clean_old_sessions)
+        logger.info(f"Extracting source: {request.url}")
         
         config = create_newspaper_config(request.language)
         source = Source(str(request.url), config=config)
+        source.build()
         
-        try:
-            source.build()
-        except Exception as e:
-            # Nếu build thất bại, thử với bypass
-            logger.warning(f"Source build failed, attempting bypass: {e}")
-            html_content = fetch_with_cloudflare_bypass(str(request.url), request.use_selenium)
-            # Tạo source từ HTML
-            source = Source(str(request.url), config=config)
-            source.set_html(html_content)
-            source.build()
-        
+        # Limit articles
         articles_to_process = source.articles[:request.max_articles]
         
         extracted_articles = []
-        extraction_stats = {"success": 0, "failed": 0, "bypass_used": 0}
-        
         for article in articles_to_process:
             try:
                 article_response = extract_article_content(
                     article.url,
                     request.language,
                     extract_images=True,
-                    summarize=False,
-                    use_selenium=request.use_selenium
+                    summarize=False
                 )
                 extracted_articles.append(article_response)
-                extraction_stats["success"] += 1
-                if article_response.bypass_used:
-                    extraction_stats["bypass_used"] += 1
-                    
             except Exception as e:
                 logger.warning(f"Failed to extract article {article.url}: {e}")
-                extraction_stats["failed"] += 1
                 continue
         
         return SourceResponse(
             source_url=str(request.url),
             articles=extracted_articles,
             total_articles=len(extracted_articles),
-            categories=source.category_urls()[:10],
-            extraction_stats=extraction_stats
+            categories=source.category_urls()[:10]  # Limit categories
         )
         
     except Exception as e:
@@ -1522,27 +1221,20 @@ async def parse_feed(
     request: FeedRequest,
     token: str = Depends(verify_token)
 ):
-    """Parse RSS/Atom feed với bypass nếu cần"""
+    """Parse RSS/Atom feed and extract articles"""
     try:
         logger.info(f"Parsing feed: {request.url}")
         
-        # Set headers cho RSS parsing
-        headers = get_stealth_headers()
-        headers['User-Agent'] = get_random_user_agent()
+        # Set random user agent for requests
+        headers = {'User-Agent': get_random_user_agent()}
         
-        # Thử parse RSS trước
-        try:
-            feed = feedparser.parse(str(request.url), request_headers=headers)
-        except Exception as e:
-            # Nếu thất bại, thử với bypass
-            logger.warning(f"RSS parsing failed, attempting bypass: {e}")
-            html_content = fetch_with_cloudflare_bypass(str(request.url))
-            feed = feedparser.parse(html_content)
+        # Parse feed
+        feed = feedparser.parse(str(request.url), request_headers=headers)
         
         if feed.bozo:
             logger.warning(f"Feed parsing warning for {request.url}: {feed.bozo_exception}")
         
-        # Trích xuất articles
+        # Extract articles
         articles = []
         entries_to_process = feed.entries[:request.max_articles]
         
@@ -1580,7 +1272,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies cho Cloudflare bypass
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -1590,57 +1282,14 @@ RUN apt-get update && apt-get install -y \
     zlib1g-dev \
     libpng-dev \
     curl \
-    wget \
-    unzip \
-    gnupg2 \
-    software-properties-common \
-    ca-certificates \
-    apt-transport-https \
-    # Chrome dependencies
-    libnss3 \
-    libatk-bridge2.0-0 \
-    libdrm2 \
-    libxkbcommon0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libgtk-3-0 \
-    libasound2 \
-    # Additional dependencies
-    libffi-dev \
-    libssl-dev \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Google Chrome
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create a non-root user for Chrome
-RUN useradd -m -s /bin/bash chromeuser && \
-    usermod -aG audio,video chromeuser
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-
-# Install Python packages với retry mechanism
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --timeout=120 --retries=3 -r requirements.txt || \
-    (echo "Retrying with alternative index..." && \
-     pip install --no-cache-dir --timeout=120 --retries=3 -i https://pypi.douban.com/simple/ -r requirements.txt)
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-
-# Set permissions
-RUN chown -R chromeuser:chromeuser /app
-
-# Switch to non-root user
-USER chromeuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -1648,11 +1297,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 
 # Expose port
 EXPOSE 8000
-
-# Environment variables for Chrome
-ENV DISPLAY=:99
-ENV CHROME_BIN=/usr/bin/google-chrome
-ENV CHROME_PATH=/usr/bin/google-chrome
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
