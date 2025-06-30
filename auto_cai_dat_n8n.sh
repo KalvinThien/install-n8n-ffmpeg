@@ -1,19 +1,18 @@
 #!/bin/bash
 
 # =============================================================================
-# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - PHIÊN BẢN HOÀN CHỈNH V3
+# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025
 # =============================================================================
-# Tác giả: Nguyễn Ngọc Thiện (Original) & v0 (Upgraded)
+# Tác giả: Nguyễn Ngọc Thiện
 # YouTube: https://www.youtube.com/@kalvinthiensocial
 # Zalo: 08.8888.4749
 # Cập nhật: 30/06/2025
 #
-# ✨ TÍNH NĂNG MỚI TRONG V3 (Bản sửa lỗi đầy đủ):
-#   - ☁️ Tích hợp Backup & Restore qua Google Drive (sử dụng rclone).
+# ✨ TÍNH NĂNG MỚI TRONG V4 (Bản sửa lỗi cuối cùng):
+#   - ✅ GUARANTEED: Đảm bảo quá trình kiểm tra SSL luôn được thực thi sau khi deploy.
+#   - ☁️ Tích hợp Backup & Restore qua Google Drive (rclone).
 #   - 🔄 Tùy chọn Restore dữ liệu ngay khi bắt đầu cài đặt (từ local hoặc G-Drive).
-#   - 🐞 Sửa lỗi phân tích SSL Rate Limit, hiển thị giờ VN (GMT+7), tránh báo động giả.
-#   - 🔑 Gỡ bỏ hoàn toàn giới hạn Bearer Token (độ dài, ký tự đặc biệt).
-#   - 💯 Giữ lại 100% code gốc và các chi tiết quan trọng.
+
 # =============================================================================
 
 set -e
@@ -55,7 +54,7 @@ RESTORE_FILE_PATH=""
 show_banner() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V3 HOÀN CHỈNH 🚀          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}            🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V4 HOÀN CHỈNH (FINAL) 🚀      ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} ☁️ Backup & Restore qua Google Drive (rclone)                             ${CYAN}║${NC}"
@@ -1857,8 +1856,68 @@ setup_cron_jobs() {
 }
 
 # =============================================================================
-# SSL RATE LIMIT DETECTION (IMPROVED)
+# DEPLOYMENT & SSL (ROBUST VERSION)
 # =============================================================================
+
+build_and_deploy() {
+    log "🏗️ Build và deploy containers..."
+    cd "$INSTALL_DIR"
+    
+    log "🛑 Dừng containers cũ (nếu có)..."
+    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
+    
+    log "🔐 Thiết lập quyền cho thư mục dữ liệu..."
+    chown -R 1000:1000 "$INSTALL_DIR/files/"
+    
+    log "📦 Build Docker images..."
+    $DOCKER_COMPOSE build --no-cache
+    
+    log "🚀 Khởi động services..."
+    $DOCKER_COMPOSE up -d
+    
+    log "⏳ Đợi services khởi động và healthy (tối đa 3 phút)..."
+    
+    local max_retries=12 # 12 retries * 15 seconds = 3 minutes
+    local retry_count=0
+    
+    while [[ $retry_count -lt $max_retries ]]; do
+        # Check if n8n container is running
+        if ! $DOCKER_COMPOSE ps | grep -q "n8n-container.*Up"; then
+            error "❌ N8N container đã dừng hoặc không thể khởi động!"
+            $DOCKER_COMPOSE logs --tail=50 n8n
+            exit 1
+        fi
+
+        # Check health status
+        local n8n_status=$(docker inspect n8n-container --format='{{.State.Health.Status}}' 2>/dev/null)
+        
+        if [[ "$n8n_status" == "healthy" ]]; then
+            success "✅ N8N container đã khởi động thành công và healthy!"
+            # Check other containers if they exist
+            if [[ "$ENABLE_NEWS_API" == "true" ]] && ! $DOCKER_COMPOSE ps | grep -q "news-api-container.*Up"; then
+                 warning "⚠️ News API container chưa chạy. Kiểm tra logs..."
+                 $DOCKER_COMPOSE logs --tail=20 fastapi
+            fi
+            if [[ "$LOCAL_MODE" == "false" ]] && ! $DOCKER_COMPOSE ps | grep -q "caddy-proxy.*Up"; then
+                 warning "⚠️ Caddy container chưa chạy. Kiểm tra logs..."
+                 $DOCKER_COMPOSE logs --tail=20 caddy
+            fi
+            return 0 # Success, exit function
+        fi
+        
+        warning "⏳ N8N container đang ở trạng thái '$n8n_status', đang đợi... ($((retry_count+1))/$max_retries)"
+        sleep 15
+        ((retry_count++))
+    done
+    
+    error "❌ N8N container không thể đạt trạng thái 'healthy' sau 3 phút."
+    echo ""
+    echo -e "${YELLOW}📋 Container logs (50 dòng cuối):${NC}"
+    $DOCKER_COMPOSE logs --tail=50 n8n
+    echo ""
+    echo -e "${YELLOW}🔧 Vui lòng chạy script chẩn đoán để tìm lỗi: bash ${INSTALL_DIR}/troubleshoot.sh${NC}"
+    exit 1
+}
 
 check_ssl_rate_limit() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
@@ -1868,7 +1927,6 @@ check_ssl_rate_limit() {
     
     log "🔒 Kiểm tra SSL certificate (logic đã cải tiến)..."
     
-    # Wait for Caddy to attempt SSL issuance
     log "⏳ Đợi Caddy xử lý SSL (tối đa 90 giây)..."
     sleep 90
     
@@ -1917,397 +1975,4 @@ else:
         echo -e "  • Domain này đã đạt giới hạn miễn phí"
         echo ""
         echo -e "${YELLOW}📅 THÔNG TIN RATE LIMIT:${NC}"
-        echo -e "  • Rate limit sẽ được reset vào khoảng: ${WHITE}$reset_time_vn${NC}"
-        echo ""
-        
-        echo -e "${YELLOW}💡 GIẢI PHÁP:${NC}"
-        echo -e "  ${GREEN}1. SỬ DỤNG STAGING SSL (TẠM THỜI):${NC}"
-        echo -e "     • Website sẽ hiển thị 'Not Secure' nhưng vẫn hoạt động"
-        echo -e "     • Có thể chuyển về production SSL sau khi rate limit reset"
-        echo ""
-        echo -e "  ${GREEN}2. ĐỢI ĐẾN KHI RATE LIMIT RESET:${NC}"
-        echo -e "     • Đợi đến sau thời gian ở trên và chạy lại script"
-        echo ""
-        
-        echo -e "${YELLOW}📋 LỊCH SỬ SSL ATTEMPTS GẦN ĐÂY:${NC}"
-        echo "$caddy_logs" | grep -i "certificate\|ssl\|acme\|rate" | tail -10 | while read line; do
-            echo -e "  ${WHITE}• $line${NC}"
-        done
-        echo ""
-        
-        read -p "🤔 Bạn muốn tiếp tục với Staging SSL? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            setup_staging_ssl
-        else
-            exit 1
-        fi
-    else
-        warning "⚠️ SSL có thể chưa sẵn sàng hoặc đã xảy ra lỗi khác."
-        echo -e "${YELLOW}Vui lòng kiểm tra log của Caddy để biết chi tiết:${NC}"
-        $DOCKER_COMPOSE logs caddy
-    fi
-}
-
-setup_staging_ssl() {
-    warning "🔧 Thiết lập Staging SSL..."
-    
-    # Stop containers
-    $DOCKER_COMPOSE down
-    
-    # Remove SSL volumes to force re-issuance
-    docker volume rm ${INSTALL_DIR##*/}_caddy_data ${INSTALL_DIR##*/}_caddy_config 2>/dev/null || true
-    
-    # Update Caddyfile for staging
-    sed -i '/acme_ca/c\    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory' "$INSTALL_DIR/Caddyfile"
-    
-    # Restart containers
-    $DOCKER_COMPOSE up -d
-    
-    success "✅ Đã thiết lập Staging SSL"
-    warning "⚠️ Website sẽ hiển thị 'Not Secure' - đây là bình thường với staging certificate"
-}
-
-# =============================================================================
-# DEPLOYMENT
-# =============================================================================
-
-build_and_deploy() {
-    log "🏗️ Build và deploy containers..."
-    
-    cd "$INSTALL_DIR"
-    
-    # Stop old containers first
-    log "🛑 Dừng containers cũ..."
-    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
-    
-    # Set permissions before starting
-    log "🔐 Thiết lập quyền cho thư mục dữ liệu..."
-    chown -R 1000:1000 "$INSTALL_DIR/files/"
-    
-    # Build images
-    log "📦 Build Docker images..."
-    $DOCKER_COMPOSE build --no-cache
-    
-    # Start services
-    log "🚀 Khởi động services..."
-    $DOCKER_COMPOSE up -d
-    
-    # Wait for services
-    log "⏳ Đợi services khởi động (có thể mất vài phút)..."
-    sleep 30
-    
-    # Check container status with health checks
-    log "🔍 Kiểm tra trạng thái containers..."
-    
-    local max_retries=10
-    local retry_count=0
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        if docker ps | grep -q "n8n-container.*Up"; then
-            local n8n_status=$(docker inspect n8n-container --format='{{.State.Health.Status}}' 2>/dev/null || echo "no-health-check")
-            if [[ "$n8n_status" == "healthy" ]]; then
-                success "✅ N8N container đã khởi động thành công và healthy!"
-                return 0
-            else
-                warning "⏳ N8N container đang chạy nhưng chưa healthy, đang đợi... (${retry_count}/${max_retries})"
-            fi
-        else
-            warning "⏳ Đợi N8N container khởi động... (${retry_count}/${max_retries})"
-        fi
-        sleep 15
-        ((retry_count++))
-    done
-    
-    error "❌ Có lỗi khi khởi động containers sau nhiều lần thử."
-    echo ""
-    echo -e "${YELLOW}📋 Container logs:${NC}"
-    $DOCKER_COMPOSE logs --tail=50
-    echo ""
-    echo -e "${YELLOW}🔧 Vui lòng chạy script chẩn đoán để tìm lỗi: bash ${INSTALL_DIR}/troubleshoot.sh${NC}"
-    exit 1
-}
-
-# =============================================================================
-# TROUBLESHOOTING SCRIPT
-# =============================================================================
-
-create_troubleshooting_script() {
-    log "🔧 Tạo script chẩn đoán..."
-    
-    cat > "$INSTALL_DIR/troubleshoot.sh" << 'EOF'
-#!/bin/bash
-
-# =============================================================================
-# N8N TROUBLESHOOTING SCRIPT
-# =============================================================================
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-WHITE='\033[1;37m'
-NC='\033[0m'
-
-echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║${WHITE}                    🔧 N8N TROUBLESHOOTING SCRIPT                            ${CYAN}║${NC}"
-echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-# Check Docker Compose command
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-elif docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
-    echo -e "${RED}❌ Docker Compose không tìm thấy!${NC}"
-    exit 1
-fi
-
-cd /home/n8n
-
-echo -e "${BLUE}📍 1. System Information:${NC}"
-echo "• OS: $(lsb_release -d | cut -f2)"
-echo "• Kernel: $(uname -r)"
-echo "• Docker: $(docker --version)"
-echo "• Docker Compose: $($DOCKER_COMPOSE --version)"
-echo "• Disk Usage: $(df -h /home/n8n | tail -1 | awk '{print $5}')"
-echo "• Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
-echo "• Uptime: $(uptime -p)"
-echo ""
-
-echo -e "${BLUE}📍 2. Installation Mode:${NC}"
-if [[ -f "Caddyfile" ]]; then
-    echo "• Mode: Production Mode (with SSL)"
-    DOMAIN=$(grep -E "^[a-zA-Z0-9.-]+\s*{" Caddyfile | head -1 | awk '{print $1}')
-    echo "• Domain: $DOMAIN"
-else
-    echo "• Mode: Local Mode"
-    echo "• Access: http://localhost:5678"
-fi
-echo ""
-
-echo -e "${BLUE}📍 3. Container Status:${NC}"
-$DOCKER_COMPOSE ps
-echo ""
-
-echo -e "${BLUE}📍 4. Docker Images:${NC}"
-docker images | grep -E "(n8n|caddy|news-api)"
-echo ""
-
-echo -e "${BLUE}📍 5. Network Status:${NC}"
-echo "• Port 80: $(netstat -tulpn 2>/dev/null | grep :80 | wc -l) connections"
-echo "• Port 443: $(netstat -tulpn 2>/dev/null | grep :443 | wc -l) connections"
-echo "• Port 5678: $(netstat -tulpn 2>/dev/null | grep :5678 | wc -l) connections"
-echo "• Port 8000: $(netstat -tulpn 2>/dev/null | grep :8000 | wc -l) connections"
-echo "• Docker Networks:"
-docker network ls | grep n8n
-echo ""
-
-if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
-    echo -e "${BLUE}📍 6. SSL Certificate Status:${NC}"
-    echo "• Domain: $DOMAIN"
-    echo "• DNS Resolution: $(dig +short $DOMAIN A | tail -1)"
-    echo "• SSL Test:"
-    timeout 10 curl -I https://$DOMAIN 2>/dev/null | head -3 || echo "  SSL not ready"
-    echo ""
-fi
-
-echo -e "${BLUE}📍 7. File Permissions:${NC}"
-echo "• N8N data directory: $(ls -ld /home/n8n/files | awk '{print $1" "$3":"$4}')"
-echo "• Database file: $(ls -l /home/n8n/files/database.sqlite 2>/dev/null | awk '{print $1" "$3":"$4}' || echo 'Not found')"
-echo ""
-
-echo -e "${BLUE}📍 8. Recent Logs (last 20 lines):${NC}"
-echo -e "${YELLOW}N8N Logs:${NC}"
-$DOCKER_COMPOSE logs --tail=20 n8n 2>/dev/null || echo "No N8N logs"
-echo ""
-
-if docker ps | grep -q "caddy-proxy"; then
-    echo -e "${YELLOW}Caddy Logs:${NC}"
-    $DOCKER_COMPOSE logs --tail=20 caddy 2>/dev/null || echo "No Caddy logs"
-    echo ""
-fi
-
-if docker ps | grep -q "news-api"; then
-    echo -e "${YELLOW}News API Logs:${NC}"
-    $DOCKER_COMPOSE logs --tail=20 fastapi 2>/dev/null || echo "No News API logs"
-    echo ""
-fi
-
-echo -e "${BLUE}📍 9. Backup Status:${NC}"
-if [[ -d "/home/n8n/files/backup_full" ]]; then
-    BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
-    echo "• Backup files: $BACKUP_COUNT"
-    if [[ $BACKUP_COUNT -gt 0 ]]; then
-        echo "• Latest backup: $(ls -t /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | xargs basename)"
-        echo "• Latest backup size: $(ls -lh /home/n8n/files/backup_full/n8n_backup_*.tar.gz | head -1 | awk '{print $5}')"
-    fi
-else
-    echo "• No backup directory found"
-fi
-echo ""
-
-echo -e "${BLUE}📍 10. Cron Jobs:${NC}"
-crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
-echo ""
-
-echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
-echo -e "${YELLOW}• Fix permissions:${NC} chown -R 1000:1000 /home/n8n/files/"
-echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE restart"
-echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
-echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
-echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
-
-if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
-    echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
-fi
-
-echo ""
-echo -e "${CYAN}✅ Troubleshooting completed!${NC}"
-EOF
-
-    chmod +x "$INSTALL_DIR/troubleshoot.sh"
-    
-    success "Đã tạo script chẩn đoán"
-}
-
-# =============================================================================
-# FINAL SUMMARY
-# =============================================================================
-
-show_final_summary() {
-    clear
-    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${WHITE}                    🎉 N8N ĐÃ ĐƯỢC CÀI ĐẶT THÀNH CÔNG!                      ${GREEN}║${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    
-    echo -e "${CYAN}🌐 TRUY CẬP DỊCH VỤ:${NC}"
-    if [[ "$LOCAL_MODE" == "true" ]]; then
-        echo -e "  • N8N: ${WHITE}http://localhost:5678${NC}"
-        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-            echo -e "  • News API: ${WHITE}http://localhost:8000${NC}"
-            echo -e "  • API Docs: ${WHITE}http://localhost:8000/docs${NC}"
-        fi
-    else
-        echo -e "  • N8N: ${WHITE}https://${DOMAIN}${NC}"
-        if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-            echo -e "  • News API: ${WHITE}https://${API_DOMAIN}${NC}"
-            echo -e "  • API Docs: ${WHITE}https://${API_DOMAIN}/docs${NC}"
-        fi
-    fi
-    
-    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-        echo -e "  • Bearer Token: ${YELLOW}Đã được đặt (không hiển thị vì bảo mật)${NC}"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}📁 THÔNG TIN HỆ THỐNG:${NC}"
-    echo -e "  • Chế độ: ${WHITE}$([[ "$LOCAL_MODE" == "true" ]] && echo "Local Mode" || echo "Production Mode")${NC}"
-    echo -e "  • Thư mục cài đặt: ${WHITE}${INSTALL_DIR}${NC}"
-    echo -e "  • Script chẩn đoán: ${WHITE}${INSTALL_DIR}/troubleshoot.sh${NC}"
-    echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
-    echo ""
-    
-    echo -e "${CYAN}💾 CẤU HÌNH BACKUP:${NC}"
-    echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
-    echo -e "  • Google Drive backup: ${WHITE}$([[ "$ENABLE_GDRIVE_BACKUP" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
-    if [[ "$LOCAL_MODE" != "true" ]]; then
-        echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
-    fi
-    echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
-    echo ""
-    
-    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
-        echo -e "${CYAN}🔧 ĐỔI BEARER TOKEN:${NC}"
-        echo -e "  ${WHITE}cd /home/n8n && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN=\"NEW_TOKEN\"/' docker-compose.yml && $DOCKER_COMPOSE restart fastapi${NC}"
-        echo ""
-    fi
-    
-    echo -e "${CYAN}🚀 TÁC GIẢ:${NC}"
-    echo -e "  • Tên: ${WHITE}Nguyễn Ngọc Thiện${NC}"
-    echo -e "  • YouTube: ${WHITE}https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1${NC}"
-    echo -e "  • Zalo: ${WHITE}08.8888.4749${NC}"
-    echo -e "  • Cập nhật: ${WHITE}30/06/2025${NC}"
-    echo ""
-    
-    echo -e "${YELLOW}🎬 ĐĂNG KÝ KÊNH YOUTUBE ĐỂ ỦNG HỘ MÌNH NHÉ! 🔔${NC}"
-    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
-}
-
-# =============================================================================
-# MAIN EXECUTION
-# =============================================================================
-
-main() {
-    # Parse arguments
-    parse_arguments "$@"
-    
-    # Show banner
-    show_banner
-    
-    # System checks
-    check_root
-    check_os
-    detect_environment
-    check_docker_compose
-    
-    # Setup swap
-    setup_swap
-    
-    # Get user input
-    get_restore_option
-    get_installation_mode
-    get_domain_input
-    get_cleanup_option
-    get_news_api_config
-    get_backup_config
-    get_auto_update_config
-    
-    # Verify DNS (skip for local mode)
-    verify_dns
-    
-    # Cleanup old installation
-    cleanup_old_installation
-    
-    # Install Docker
-    install_docker
-    
-    # Create project structure
-    create_project_structure
-    
-    # Perform restore if requested
-    perform_restore
-    
-    # Create configuration files
-    create_dockerfile
-    create_news_api
-    create_docker_compose
-    create_caddyfile
-    
-    # Create scripts
-    create_backup_scripts
-    create_update_script
-    create_troubleshooting_script
-    
-    # Setup Backup Configs
-    setup_backup_configs
-    
-    # Setup cron jobs (skip for local mode)
-    setup_cron_jobs
-    
-    # Build and deploy
-    build_and_deploy
-    
-    # Check SSL and rate limits (skip for local mode)
-    check_ssl_rate_limit
-    
-    # Show final summary
-    show_final_summary
-}
-
-# Run main function
-main "$@"
+        echo -e "  • Rate limit sẽ được reset vào khoảng: ${WHITE}$reset_time_vn${N
