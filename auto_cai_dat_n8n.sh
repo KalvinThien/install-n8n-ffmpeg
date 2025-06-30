@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025
+# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - PHIÊN BẢN HOÀN CHỈNH V3
 # =============================================================================
 # Tác giả: Nguyễn Ngọc Thiện
 # YouTube: https://www.youtube.com/@kalvinthiensocial
@@ -9,14 +9,12 @@
 # Cập nhật: 30/06/2025
 #
 # ✨ TÍNH NĂNG MỚI
-
-#   - ☁️ Tích hợp Backup & Restore qua Google Drive (rclone).
+#   - ☁️ Tích hợp Backup & Restore qua Google Drive (sử dụng rclone).
 #   - 🔄 Tùy chọn Restore dữ liệu ngay khi bắt đầu cài đặt (từ local hoặc G-Drive).
 #   - 🔑 Gỡ bỏ hoàn toàn giới hạn Bearer Token (độ dài, ký tự đặc biệt).
 
 # =============================================================================
 
-# set -e
 set -e
 
 # Colors for output
@@ -56,7 +54,7 @@ RESTORE_FILE_PATH=""
 show_banner() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}            🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V4 HOÀN CHỈNH (FINAL) 🚀      ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V3 HOÀN CHỈNH 🚀          ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} ☁️ Backup & Restore qua Google Drive (rclone)                             ${CYAN}║${NC}"
@@ -1858,68 +1856,8 @@ setup_cron_jobs() {
 }
 
 # =============================================================================
-# DEPLOYMENT & SSL (ROBUST VERSION)
+# SSL RATE LIMIT DETECTION (IMPROVED)
 # =============================================================================
-
-build_and_deploy() {
-    log "🏗️ Build và deploy containers..."
-    cd "$INSTALL_DIR"
-    
-    log "🛑 Dừng containers cũ (nếu có)..."
-    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
-    
-    log "🔐 Thiết lập quyền cho thư mục dữ liệu..."
-    chown -R 1000:1000 "$INSTALL_DIR/files/"
-    
-    log "📦 Build Docker images..."
-    $DOCKER_COMPOSE build --no-cache
-    
-    log "🚀 Khởi động services..."
-    $DOCKER_COMPOSE up -d
-    
-    log "⏳ Đợi services khởi động và healthy (tối đa 3 phút)..."
-    
-    local max_retries=12 # 12 retries * 15 seconds = 3 minutes
-    local retry_count=0
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        # Check if n8n container is running
-        if ! $DOCKER_COMPOSE ps | grep -q "n8n-container.*Up"; then
-            error "❌ N8N container đã dừng hoặc không thể khởi động!"
-            $DOCKER_COMPOSE logs --tail=50 n8n
-            exit 1
-        fi
-
-        # Check health status
-        local n8n_status=$(docker inspect n8n-container --format='{{.State.Health.Status}}' 2>/dev/null)
-        
-        if [[ "$n8n_status" == "healthy" ]]; then
-            success "✅ N8N container đã khởi động thành công và healthy!"
-            # Check other containers if they exist
-            if [[ "$ENABLE_NEWS_API" == "true" ]] && ! $DOCKER_COMPOSE ps | grep -q "news-api-container.*Up"; then
-                 warning "⚠️ News API container chưa chạy. Kiểm tra logs..."
-                 $DOCKER_COMPOSE logs --tail=20 fastapi
-            fi
-            if [[ "$LOCAL_MODE" == "false" ]] && ! $DOCKER_COMPOSE ps | grep -q "caddy-proxy.*Up"; then
-                 warning "⚠️ Caddy container chưa chạy. Kiểm tra logs..."
-                 $DOCKER_COMPOSE logs --tail=20 caddy
-            fi
-            return 0 # Success, exit function
-        fi
-        
-        warning "⏳ N8N container đang ở trạng thái '$n8n_status', đang đợi... ($((retry_count+1))/$max_retries)"
-        sleep 15
-        ((retry_count++))
-    done
-    
-    error "❌ N8N container không thể đạt trạng thái 'healthy' sau 3 phút."
-    echo ""
-    echo -e "${YELLOW}📋 Container logs (50 dòng cuối):${NC}"
-    $DOCKER_COMPOSE logs --tail=50 n8n
-    echo ""
-    echo -e "${YELLOW}🔧 Vui lòng chạy script chẩn đoán để tìm lỗi: bash ${INSTALL_DIR}/troubleshoot.sh${NC}"
-    exit 1
-}
 
 check_ssl_rate_limit() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
@@ -1929,6 +1867,7 @@ check_ssl_rate_limit() {
     
     log "🔒 Kiểm tra SSL certificate (logic đã cải tiến)..."
     
+    # Wait for Caddy to attempt SSL issuance
     log "⏳ Đợi Caddy xử lý SSL (tối đa 90 giây)..."
     sleep 90
     
@@ -2016,8 +1955,7 @@ setup_staging_ssl() {
     $DOCKER_COMPOSE down
     
     # Remove SSL volumes to force re-issuance
-    local project_name=$(basename "$INSTALL_DIR")
-    docker volume rm ${project_name}_caddy_data ${project_name}_caddy_config 2>/dev/null || true
+    docker volume rm ${INSTALL_DIR##*/}_caddy_data ${INSTALL_DIR##*/}_caddy_config 2>/dev/null || true
     
     # Update Caddyfile for staging
     sed -i '/acme_ca/c\    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory' "$INSTALL_DIR/Caddyfile"
@@ -2027,6 +1965,121 @@ setup_staging_ssl() {
     
     success "✅ Đã thiết lập Staging SSL"
     warning "⚠️ Website sẽ hiển thị 'Not Secure' - đây là bình thường với staging certificate"
+}
+
+# =============================================================================
+# DEPLOYMENT
+# =============================================================================
+
+build_and_deploy() {
+    log "🏗️ Build và deploy containers..."
+    cd "$INSTALL_DIR"
+    
+    log "🛑 Dừng containers cũ (nếu có)..."
+    $DOCKER_COMPOSE down --remove-orphans 2>/dev/null || true
+    
+    log "🔐 Thiết lập quyền cho thư mục dữ liệu..."
+    chown -R 1000:1000 "$INSTALL_DIR/files/"
+    
+    log "📦 Build Docker images..."
+    $DOCKER_COMPOSE build --no-cache
+    
+    log "🚀 Khởi động services..."
+    $DOCKER_COMPOSE up -d
+    
+    log "⏳ Đợi services khởi động và healthy (tối đa 3 phút)..."
+
+    local services_to_check=("n8n-container")
+    if [[ "$LOCAL_MODE" != "true" ]]; then
+        services_to_check+=("caddy-proxy")
+    fi
+    if [[ "$ENABLE_NEWS_API" == "true" ]]; then
+        services_to_check+=("news-api-container")
+    fi
+
+    local all_healthy=false
+    local max_retries=12 # 12 retries * 15 seconds = 180 seconds = 3 minutes
+    local retry_count=0
+
+    # Temporarily disable exit on error for the check loop
+    set +e
+
+    while [[ $retry_count -lt $max_retries ]]; do
+        all_healthy=true
+        for service in "${services_to_check[@]}"; do
+            # 1. Check if container is running
+            container_id=$(docker ps -q --filter "name=^${service}$")
+            if [[ -z "$container_id" ]]; then
+                warning "Service '${service}' chưa chạy. Đang đợi... ($((retry_count+1))/${max_retries})"
+                all_healthy=false
+                break # Break inner loop, try again after sleep
+            fi
+
+            # 2. Check health status (if health check exists)
+            health_status=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-health-check{{end}}' "$service")
+            exit_code=$?
+
+            if [[ $exit_code -ne 0 ]]; then
+                warning "Không thể kiểm tra trạng thái của '${service}'. Có thể nó đang khởi động lại. Đang đợi... ($((retry_count+1))/${max_retries})"
+                all_healthy=false
+                break
+            fi
+
+            if [[ "$health_status" == "healthy" ]]; then
+                info "✅ Service '${service}' đã healthy."
+                continue # Check next service
+            elif [[ "$health_status" == "unhealthy" ]]; then
+                error "❌ Service '${service}' đã unhealthy. Kiểm tra logs."
+                $DOCKER_COMPOSE logs "$service" --tail=50
+                # Re-enable exit on error before exiting
+                set -e
+                exit 1
+            else
+                # Status is 'starting' or 'no-health-check'
+                if [[ "$health_status" == "no-health-check" ]]; then
+                     # For services without healthcheck, just being 'running' is enough
+                     container_status=$(docker inspect --format='{{.State.Status}}' "$service")
+                     if [[ "$container_status" == "running" ]]; then
+                        info "✅ Service '${service}' đang chạy (không có health check)."
+                        continue
+                     else
+                        warning "⏳ Service '${service}' đang ở trạng thái '${container_status}'. Đang đợi... ($((retry_count+1))/${max_retries})"
+                        all_healthy=false
+                        break
+                     fi
+                else
+                    warning "⏳ Service '${service}' đang ở trạng thái '${health_status}'. Đang đợi... ($((retry_count+1))/${max_retries})"
+                    all_healthy=false
+                    break # Break inner loop, try again after sleep
+                fi
+            fi
+        done
+
+        if [[ "$all_healthy" == "true" ]]; then
+            break # Exit while loop
+        fi
+
+        sleep 15
+        ((retry_count++))
+    done
+
+    # Re-enable exit on error
+    set -e
+
+    if [[ "$all_healthy" != "true" ]]; then
+        error "❌ Một hoặc nhiều services không thể khởi động thành công sau 3 phút."
+        echo ""
+        echo -e "${YELLOW}📋 Trạng thái containers cuối cùng:${NC}"
+        $DOCKER_COMPOSE ps
+        echo ""
+        echo -e "${YELLOW}📋 Logs của các container:${NC}"
+        $DOCKER_COMPOSE logs --tail=100
+        echo ""
+        echo -e "${YELLOW}🔧 Vui lòng chạy script chẩn đoán để tìm lỗi: bash ${INSTALL_DIR}/troubleshoot.sh${NC}"
+        exit 1
+    fi
+
+    success "🎉 Tất cả services đã khởi động thành công!"
 }
 
 # =============================================================================
