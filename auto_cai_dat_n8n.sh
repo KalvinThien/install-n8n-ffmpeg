@@ -1391,7 +1391,7 @@ services:
       - N8N_USER_FOLDER=/files
       - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
       - DB_TYPE=sqlite
-      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
+      - DB_SQLITE_DATABASE=/files/database.sqlite
       - N8N_BASIC_AUTH_ACTIVE=false
       - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
       - EXECUTIONS_TIMEOUT=3600
@@ -1401,7 +1401,7 @@ services:
       - N8N_BINARY_DATA_MODE=filesystem
     volumes:
       - ./files:/files
-      - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
+      - ./files/youtube_content_anylystic:/files/youtube_content_anylystic
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - n8n_network
