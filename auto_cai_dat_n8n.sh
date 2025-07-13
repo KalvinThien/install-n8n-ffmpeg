@@ -1330,7 +1330,7 @@ services:
       - N8N_METRICS=true
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/home/node
+      - /home/node
       - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
       - DB_TYPE=sqlite
       - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
@@ -1388,7 +1388,7 @@ services:
       - N8N_METRICS=true
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/home/node
+      - N8N_USER_FOLDER=/files
       - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
       - DB_TYPE=sqlite
       - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
@@ -1400,7 +1400,7 @@ services:
       - N8N_BINARY_DATA_TTL=1440
       - N8N_BINARY_DATA_MODE=filesystem
     volumes:
-      - ./files:/home/node/.n8n
+      - ./files:/files
       - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
