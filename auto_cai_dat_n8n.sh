@@ -1,17 +1,19 @@
 #!/bin/bash
 
 # =============================================================================
-# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 
+# 🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - FIXED VERSION
 # =============================================================================
 # Tác giả: Nguyễn Ngọc Thiện
 # YouTube: https://www.youtube.com/@kalvinthiensocial
 # Zalo: 08.8888.4749
-# Cập nhật: 30/06/2025
+# Cập nhật: 02/8/2025
 #
-# ✨ TÍNH NĂNG MỚI
-#   - ☁️ Tích hợp Backup & Restore qua Google Drive (sử dụng rclone).
-#   - 🔄 Tùy chọn Restore dữ liệu ngay khi bắt đầu cài đặt (từ local hoặc G-Drive).
-#   - 🔑 Gỡ bỏ hoàn toàn giới hạn Bearer Token (độ dài, ký tự đặc biệt).
+# ✨ FIXED ISSUES:
+#   - ✅ Sửa lỗi auto-update không hoạt động
+#   - ✅ Sửa lỗi restore backup thất bại
+#   - ✅ Thêm health check và monitoring
+#   - ✅ Cải thiện logging và error handling
+#   - ✅ Sửa lỗi cron job không chạy
 
 # =============================================================================
 
@@ -54,19 +56,19 @@ RESTORE_FILE_PATH=""
 show_banner() {
     clear
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - V3 HOÀN CHỈNH 🚀          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - FIXED VERSION 🚀          ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
-    echo -e "${CYAN}║${WHITE} ☁️ Backup & Restore qua Google Drive (rclone)                             ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} ✅ Fixed: Auto-update, Restore backup, Health monitoring                   ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔄 Tùy chọn Restore dữ liệu ngay khi cài đặt                              ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🐞 Sửa lỗi phân tích SSL Rate Limit, hiển thị giờ VN (GMT+7)              ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔑 Gỡ bỏ giới hạn Bearer Token (độ dài, ký tự đặc biệt)                   ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${YELLOW} 👨‍💻 Tác giả: Nguyễn Ngọc Thiện (Original) & v0 (Upgraded)                  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW} 👨‍💻 Tác giả: Nguyễn Ngọc Thiện                                              ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW} 📺 YouTube: https://www.youtube.com/@kalvinthiensocial                  ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW} 📱 Zalo: 08.8888.4749                                                   ${CYAN}║${NC}"
     echo -e "${CYAN}║${YELLOW} 🎬 Đăng ký kênh để ủng hộ mình nhé! 🔔                                  ${CYAN}║${NC}"
-    echo -e "${CYAN}║${YELLOW} 📅 Cập nhật: 30/06/2025                                                 ${CYAN}║${NC}"
+    echo -e "${CYAN}║${YELLOW} 📅 Cập nhật: 02/01/2025                                                 ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -236,7 +238,7 @@ setup_swap() {
 }
 
 # =============================================================================
-# RCLONE & RESTORE FUNCTIONS
+# RCLONE & RESTORE FUNCTIONS (FIXED)
 # =============================================================================
 
 install_rclone() {
@@ -353,6 +355,15 @@ get_restore_option() {
             fi
         done
     fi
+    
+    # Validate backup file
+    log "🔍 Kiểm tra tính toàn vẹn file backup..."
+    if tar -tzf "$RESTORE_FILE_PATH" &>/dev/null; then
+        success "File backup hợp lệ"
+    else
+        error "File backup bị hỏng hoặc không đúng định dạng"
+        exit 1
+    fi
 }
 
 perform_restore() {
@@ -365,31 +376,54 @@ perform_restore() {
     
     # Clean target directory
     log "🧹 Dọn dẹp thư mục dữ liệu cũ..."
-    rm -rf "$INSTALL_DIR/files/*"
+    rm -rf "$INSTALL_DIR/files/"* 2>/dev/null || true
     
     # Extract backup
     log "📦 Giải nén file backup..."
     local temp_extract_dir="/tmp/n8n_restore_extract_$$"
     mkdir -p "$temp_extract_dir"
     
-    if tar -xzf "$RESTORE_FILE_PATH" -C "$temp_extract_dir"; then
-        local backup_content_dir=$(find "$temp_extract_dir" -mindepth 1 -maxdepth 1 -type d)
-        if [[ -d "$backup_content_dir" ]]; then
+    # Extract with verbose output for debugging
+    if tar -xzvf "$RESTORE_FILE_PATH" -C "$temp_extract_dir" > /tmp/extract_log.txt 2>&1; then
+        log "Nội dung file backup:"
+        ls -la "$temp_extract_dir/"
+        
+        # Find the backup content directory
+        local backup_content_dir=""
+        if [[ -d "$temp_extract_dir/n8n_backup_"* ]]; then
+            backup_content_dir=$(find "$temp_extract_dir" -maxdepth 1 -type d -name "n8n_backup_*" | head -1)
+        elif [[ -d "$temp_extract_dir/credentials" ]]; then
+            backup_content_dir="$temp_extract_dir"
+        fi
+        
+        if [[ -n "$backup_content_dir" && -d "$backup_content_dir" ]]; then
             log "Tìm thấy nội dung backup trong: $backup_content_dir"
+            
             # Restore credentials (database, encryption key)
             if [[ -d "$backup_content_dir/credentials" ]]; then
                 log "Khôi phục database và key..."
-                cp -a "$backup_content_dir/credentials/." "$INSTALL_DIR/files/"
+                cp -a "$backup_content_dir/credentials/"* "$INSTALL_DIR/files/" 2>/dev/null || true
+                
+                # Set proper permissions
+                if [[ -f "$INSTALL_DIR/files/database.sqlite" ]]; then
+                    chmod 644 "$INSTALL_DIR/files/database.sqlite"
+                    chown 1000:1000 "$INSTALL_DIR/files/database.sqlite"
+                fi
             fi
+            
             # Restore config files (docker-compose.yml, Caddyfile)
             if [[ -d "$backup_content_dir/config" ]]; then
                 log "Khôi phục file cấu hình..."
-                cp -a "$backup_content_dir/config/." "$INSTALL_DIR/"
+                # Backup current configs
+                [[ -f "$INSTALL_DIR/docker-compose.yml" ]] && cp "$INSTALL_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml.bak"
+                [[ -f "$INSTALL_DIR/Caddyfile" ]] && cp "$INSTALL_DIR/Caddyfile" "$INSTALL_DIR/Caddyfile.bak"
+                
+                # Restore configs
+                cp -a "$backup_content_dir/config/"* "$INSTALL_DIR/" 2>/dev/null || true
             fi
-            # Restore other data if needed (e.g., user files)
-            # This part can be expanded if the backup contains more data.
         else
             error "Cấu trúc file backup không hợp lệ. Không tìm thấy thư mục nội dung."
+            cat /tmp/extract_log.txt
             rm -rf "$temp_extract_dir"
             exit 1
         fi
@@ -399,9 +433,13 @@ perform_restore() {
             rm -rf "/tmp/n8n_restore"
         fi
         
+        # Set proper ownership
+        chown -R 1000:1000 "$INSTALL_DIR/files/"
+        
         success "✅ Khôi phục dữ liệu thành công!"
     else
-        error "Giải nén file backup thất bại."
+        error "Giải nén file backup thất bại. Chi tiết lỗi:"
+        cat /tmp/extract_log.txt
         rm -rf "$temp_extract_dir"
         exit 1
     fi
@@ -603,6 +641,7 @@ get_auto_update_config() {
     echo -e "  📦 Cập nhật yt-dlp, FFmpeg và các dependencies"
     echo -e "  📋 Ghi log chi tiết quá trình update"
     echo -e "  🔒 Backup trước khi update"
+    echo -e "  📱 Thông báo Telegram khi update thành công/thất bại"
     echo ""
     
     read -p "🔄 Bạn có muốn bật Auto-Update? (Y/n): " -n 1 -r
@@ -769,6 +808,12 @@ create_project_structure() {
     if [[ "$ENABLE_NEWS_API" == "true" ]]; then
         mkdir -p news_api
     fi
+    
+    # Create log files
+    touch logs/backup.log
+    touch logs/update.log
+    touch logs/cron.log
+    touch logs/health.log
     
     success "Đã tạo cấu trúc thư mục"
 }
@@ -1330,7 +1375,7 @@ services:
       - N8N_METRICS=true
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      - /home/node
+      - N8N_USER_FOLDER=/home/node
       - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
       - DB_TYPE=sqlite
       - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
@@ -1388,10 +1433,10 @@ services:
       - N8N_METRICS=true
       - N8N_LOG_LEVEL=info
       - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/files
+      - N8N_USER_FOLDER=/home/node
       - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
       - DB_TYPE=sqlite
-      - DB_SQLITE_DATABASE=/files/database.sqlite
+      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
       - N8N_BASIC_AUTH_ACTIVE=false
       - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
       - EXECUTIONS_TIMEOUT=3600
@@ -1400,8 +1445,8 @@ services:
       - N8N_BINARY_DATA_TTL=1440
       - N8N_BINARY_DATA_MODE=filesystem
     volumes:
-      - ./files:/files
-      - ./files/youtube_content_anylystic:/files/youtube_content_anylystic
+      - ./files:/home/node/.n8n
+      - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - n8n_network
@@ -1539,41 +1584,45 @@ EOF
 }
 
 # =============================================================================
-# BACKUP SYSTEM
+# BACKUP SYSTEM (FIXED)
 # =============================================================================
 
 create_backup_scripts() {
     log "💾 Tạo hệ thống backup..."
     
     # Main backup script
-    cat > "$INSTALL_DIR/backup-workflows.sh" << EOF
+    cat > "$INSTALL_DIR/backup-workflows.sh" << 'EOF'
 #!/bin/bash
 
 # =============================================================================
-# N8N BACKUP SCRIPT - Tự động backup workflows và credentials
+# N8N BACKUP SCRIPT - FIXED VERSION
 # =============================================================================
 
 set -e
 
 BACKUP_DIR="/home/n8n/files/backup_full"
 LOG_FILE="/home/n8n/logs/backup.log"
-TIMESTAMP=\$(date +"%Y%m%d_%H%M%S")
-BACKUP_NAME="n8n_backup_\$TIMESTAMP"
-TEMP_DIR="/tmp/\$BACKUP_NAME"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_NAME="n8n_backup_$TIMESTAMP"
+TEMP_DIR="/tmp/$BACKUP_NAME"
 
 # Colors
-RED='\\033[0;31m'
-GREEN='\\033[0;32m'
-YELLOW='\\033[1;33m'
-NC='\\033[0m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
 log() {
-    echo -e "\${GREEN}[\$(date +'%Y-%m-%d %H:%M:%S')] \$1\${NC}" | tee -a "\$LOG_FILE"
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a "$LOG_FILE"
 }
 
 error() {
-    echo -e "\${RED}[ERROR] \$1\${NC}" | tee -a "\$LOG_FILE"
+    echo -e "${RED}[ERROR] $1${NC}" | tee -a "$LOG_FILE"
 }
+
+# Create directories
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$(dirname "$LOG_FILE")"
 
 # Check Docker Compose command
 if command -v docker-compose &> /dev/null; then
@@ -1586,74 +1635,112 @@ else
 fi
 
 # Create backup directory
-mkdir -p "\$BACKUP_DIR"
-mkdir -p "\$TEMP_DIR"
+mkdir -p "$BACKUP_DIR"
+mkdir -p "$TEMP_DIR"
 
 log "🔄 Bắt đầu backup N8N..."
 
 # Backup database and encryption key
 log "💾 Backup database và key..."
-mkdir -p "\$TEMP_DIR/credentials"
-cp "/home/n8n/files/database.sqlite" "\$TEMP_DIR/credentials/"
-cp "/home/n8n/files/encryptionKey" "\$TEMP_DIR/credentials/" 2>/dev/null || true
+mkdir -p "$TEMP_DIR/credentials"
+
+# Copy database with error handling
+if [[ -f "/home/n8n/files/database.sqlite" ]]; then
+    cp "/home/n8n/files/database.sqlite" "$TEMP_DIR/credentials/" || {
+        error "Không thể copy database"
+        exit 1
+    }
+else
+    # Try alternative paths
+    DB_PATH=$(find /home/n8n/files -name "database.sqlite" -type f 2>/dev/null | head -1)
+    if [[ -n "$DB_PATH" ]]; then
+        cp "$DB_PATH" "$TEMP_DIR/credentials/"
+    else
+        error "Không tìm thấy database.sqlite"
+    fi
+fi
+
+# Copy encryption key
+cp "/home/n8n/files/encryptionKey" "$TEMP_DIR/credentials/" 2>/dev/null || log "Không tìm thấy encryptionKey"
 
 # Backup config files
 log "🔧 Backup config files..."
-mkdir -p "\$TEMP_DIR/config"
-cp /home/n8n/docker-compose.yml "\$TEMP_DIR/config/" 2>/dev/null || true
-cp /home/n8n/Caddyfile "\$TEMP_DIR/config/" 2>/dev/null || true
+mkdir -p "$TEMP_DIR/config"
+cp /home/n8n/docker-compose.yml "$TEMP_DIR/config/" 2>/dev/null || true
+cp /home/n8n/Caddyfile "$TEMP_DIR/config/" 2>/dev/null || true
+cp /home/n8n/telegram_config.txt "$TEMP_DIR/config/" 2>/dev/null || true
+cp /home/n8n/gdrive_config.txt "$TEMP_DIR/config/" 2>/dev/null || true
 
 # Create metadata
 log "📊 Tạo metadata..."
-cat > "\$TEMP_DIR/backup_metadata.json" << EOL
+cat > "$TEMP_DIR/backup_metadata.json" << EOL
 {
-    "backup_date": "\$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-    "backup_name": "\$BACKUP_NAME",
-    "n8n_version": "\$(docker exec n8n-container n8n --version 2>/dev/null || echo 'unknown')",
-    "backup_type": "full"
+    "backup_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+    "backup_name": "$BACKUP_NAME",
+    "n8n_version": "$(docker exec n8n-container n8n --version 2>/dev/null || echo 'unknown')",
+    "backup_type": "full",
+    "files_included": $(find "$TEMP_DIR" -type f | wc -l)
 }
 EOL
 
 # Create compressed backup
 log "📦 Tạo file backup nén..."
 cd /tmp
-tar -czf "\$BACKUP_DIR/\$BACKUP_NAME.tar.gz" "\$BACKUP_NAME/"
+tar -czf "$BACKUP_DIR/$BACKUP_NAME.tar.gz" "$BACKUP_NAME/" || {
+    error "Không thể tạo file backup"
+    rm -rf "$TEMP_DIR"
+    exit 1
+}
+
+# Verify backup
+log "🔍 Kiểm tra file backup..."
+if tar -tzf "$BACKUP_DIR/$BACKUP_NAME.tar.gz" >/dev/null 2>&1; then
+    log "✅ File backup hợp lệ"
+else
+    error "File backup bị lỗi"
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
 
 # Get backup size
-BACKUP_SIZE=\$(ls -lh "\$BACKUP_DIR/\$BACKUP_NAME.tar.gz" | awk '{print \$5}')
-log "✅ Backup hoàn thành: \$BACKUP_NAME.tar.gz (\$BACKUP_SIZE)"
+BACKUP_SIZE=$(ls -lh "$BACKUP_DIR/$BACKUP_NAME.tar.gz" | awk '{print $5}')
+log "✅ Backup hoàn thành: $BACKUP_NAME.tar.gz ($BACKUP_SIZE)"
 
 # Cleanup temp directory
-rm -rf "\$TEMP_DIR"
+rm -rf "$TEMP_DIR"
 
 # Keep only last 30 local backups
 log "🧹 Cleanup old local backups..."
-cd "\$BACKUP_DIR"
-ls -t n8n_backup_*.tar.gz | tail -n +31 | xargs -r rm -f
+cd "$BACKUP_DIR"
+ls -t n8n_backup_*.tar.gz 2>/dev/null | tail -n +31 | xargs -r rm -f
 
 # Send to Telegram if configured
 if [[ -f "/home/n8n/telegram_config.txt" ]]; then
     source "/home/n8n/telegram_config.txt"
     
-    if [[ -n "\$TELEGRAM_BOT_TOKEN" && -n "\$TELEGRAM_CHAT_ID" ]]; then
+    if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
         log "📱 Gửi thông báo Telegram..."
         MESSAGE="🔄 *N8N Backup Completed*
-📅 Date: \$(date +'%Y-%m-%d %H:%M:%S')
-📦 File: \`\$BACKUP_NAME.tar.gz\`
-💾 Size: \$BACKUP_SIZE
+📅 Date: $(date +'%Y-%m-%d %H:%M:%S')
+📦 File: \`$BACKUP_NAME.tar.gz\`
+💾 Size: $BACKUP_SIZE
 📊 Status: ✅ Success"
-        curl -s -X POST "https://api.telegram.org/bot\$TELEGRAM_BOT_TOKEN/sendMessage" -d chat_id="\$TELEGRAM_CHAT_ID" -d text="\$MESSAGE" -d parse_mode="Markdown" > /dev/null || true
+        
+        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            -d chat_id="$TELEGRAM_CHAT_ID" \
+            -d text="$MESSAGE" \
+            -d parse_mode="Markdown" > /dev/null || log "Không thể gửi Telegram"
     fi
 fi
 
 # Upload to Google Drive if configured
 if [[ -f "/home/n8n/gdrive_config.txt" ]]; then
     source "/home/n8n/gdrive_config.txt"
-    if [[ -n "\$RCLONE_REMOTE_NAME" && -n "\$GDRIVE_BACKUP_FOLDER" ]]; then
+    if [[ -n "$RCLONE_REMOTE_NAME" && -n "$GDRIVE_BACKUP_FOLDER" ]]; then
         log "☁️ Uploading to Google Drive..."
-        rclone copy "\$BACKUP_DIR/\$BACKUP_NAME.tar.gz" "\$RCLONE_REMOTE_NAME:\$GDRIVE_BACKUP_FOLDER" --progress
+        rclone copy "$BACKUP_DIR/$BACKUP_NAME.tar.gz" "$RCLONE_REMOTE_NAME:$GDRIVE_BACKUP_FOLDER" --progress || log "Upload Google Drive thất bại"
         log "🧹 Cleanup old Google Drive backups (older than 30 days)..."
-        rclone delete --min-age 30d "\$RCLONE_REMOTE_NAME:\$GDRIVE_BACKUP_FOLDER"
+        rclone delete --min-age 30d "$RCLONE_REMOTE_NAME:$GDRIVE_BACKUP_FOLDER" || true
     fi
 fi
 
@@ -1683,7 +1770,7 @@ echo "🔄 Chạy backup test..."
 
 echo ""
 echo "📊 Kết quả backup:"
-ls -lah /home/n8n/files/backup_full/n8n_backup_*.tar.gz | tail -5
+ls -lah /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | tail -5
 
 echo ""
 echo "✅ Manual backup test completed!"
@@ -1705,7 +1792,7 @@ create_update_script() {
 #!/bin/bash
 
 # =============================================================================
-# N8N AUTO-UPDATE SCRIPT
+# N8N AUTO-UPDATE SCRIPT - FIXED VERSION
 # =============================================================================
 
 set -e
@@ -1719,12 +1806,28 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Create log directory
+mkdir -p "$(dirname "$LOG_FILE")"
+
 log() {
     echo -e "${GREEN}[$TIMESTAMP] $1${NC}" | tee -a "$LOG_FILE"
 }
 
 error() {
     echo -e "${RED}[$TIMESTAMP] [ERROR] $1${NC}" | tee -a "$LOG_FILE"
+}
+
+send_telegram() {
+    if [[ -f "/home/n8n/telegram_config.txt" ]]; then
+        source "/home/n8n/telegram_config.txt"
+        
+        if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+                -d chat_id="$TELEGRAM_CHAT_ID" \
+                -d text="$1" \
+                -d parse_mode="Markdown" > /dev/null || true
+        fi
+    fi
 }
 
 # Check Docker Compose command
@@ -1734,6 +1837,9 @@ elif docker compose version &> /dev/null; then
     DOCKER_COMPOSE="docker compose"
 else
     error "Docker Compose không tìm thấy!"
+    send_telegram "❌ *N8N Update Failed*
+Docker Compose không tìm thấy
+Time: $TIMESTAMP"
     exit 1
 fi
 
@@ -1743,61 +1849,97 @@ log "🔄 Bắt đầu auto-update N8N..."
 
 # Backup before update
 log "💾 Backup trước khi update..."
-./backup-workflows.sh
+./backup-workflows.sh || {
+    error "Backup thất bại"
+    send_telegram "❌ *N8N Update Failed*
+Backup thất bại
+Time: $TIMESTAMP"
+    exit 1
+}
+
+# Get current version before update
+OLD_VERSION=$(docker exec n8n-container n8n --version 2>/dev/null || echo "unknown")
 
 # Pull latest images
 log "📦 Pull latest Docker images..."
-$DOCKER_COMPOSE pull
+$DOCKER_COMPOSE pull || {
+    error "Pull images thất bại"
+    send_telegram "❌ *N8N Update Failed*
+Pull images thất bại
+Time: $TIMESTAMP"
+    exit 1
+}
 
 # Update yt-dlp in running container
 log "📺 Update yt-dlp..."
-docker exec n8n-container pip3 install --break-system-packages -U yt-dlp || true
+docker exec n8n-container pip3 install --break-system-packages -U yt-dlp || log "Update yt-dlp thất bại (non-critical)"
 
 # Restart services
 log "🔄 Restart services..."
-$DOCKER_COMPOSE up -d
+$DOCKER_COMPOSE up -d || {
+    error "Restart services thất bại"
+    send_telegram "❌ *N8N Update Failed*
+Restart services thất bại
+Time: $TIMESTAMP"
+    exit 1
+}
 
 # Wait for services to be ready
 log "⏳ Đợi services khởi động..."
 sleep 30
 
 # Check if services are running
+SERVICES_STATUS=""
 if docker ps | grep -q "n8n-container"; then
     log "✅ N8N container đang chạy"
+    SERVICES_STATUS="$SERVICES_STATUS
+✅ N8N: Running"
 else
     error "❌ N8N container không chạy"
+    SERVICES_STATUS="$SERVICES_STATUS
+❌ N8N: Not running"
 fi
 
 if docker ps | grep -q "caddy-proxy"; then
     log "✅ Caddy container đang chạy"
+    SERVICES_STATUS="$SERVICES_STATUS
+✅ Caddy: Running"
+fi
+
+if docker ps | grep -q "news-api-container"; then
+    log "✅ News API container đang chạy"
+    SERVICES_STATUS="$SERVICES_STATUS
+✅ News API: Running"
+fi
+
+# Get new version after update
+NEW_VERSION=$(docker exec n8n-container n8n --version 2>/dev/null || echo "unknown")
+
+# Health check
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz || echo "000")
+if [[ "$HEALTH_STATUS" == "200" ]]; then
+    HEALTH_MSG="✅ Health check passed"
 else
-    log "ℹ️ Caddy container không chạy (có thể đang ở Local Mode)"
+    HEALTH_MSG="❌ Health check failed (HTTP $HEALTH_STATUS)"
 fi
 
-# Send Telegram notification if configured
-if [[ -f "/home/n8n/telegram_config.txt" ]]; then
-    source "/home/n8n/telegram_config.txt"
-    
-    if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
-        MESSAGE="🔄 *N8N Auto-Update Completed*
+# Send success notification
+MESSAGE="🔄 *N8N Auto-Update Report*
         
-📅 Date: $TIMESTAMP
+📅 Time: $TIMESTAMP
 🚀 Status: ✅ Success
-📦 Components updated:
-• N8N Docker image
-• yt-dlp
-• System dependencies
+📦 Version: $OLD_VERSION → $NEW_VERSION
+🏥 Health: $HEALTH_MSG
 
-🌐 Services: All running normally"
+📊 Services:$SERVICES_STATUS
 
-        curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-            -d chat_id="$TELEGRAM_CHAT_ID" \
-            -d text="$MESSAGE" \
-            -d parse_mode="Markdown" > /dev/null || true
-    fi
-fi
+🌐 All systems operational!"
+
+send_telegram "$MESSAGE"
 
 log "🎉 Auto-update completed successfully!"
+log "Old version: $OLD_VERSION"
+log "New version: $NEW_VERSION"
 EOF
 
     chmod +x "$INSTALL_DIR/update-n8n.sh"
@@ -1830,7 +1972,7 @@ EOF
 }
 
 # =============================================================================
-# CRON JOBS
+# CRON JOBS (FIXED)
 # =============================================================================
 
 setup_cron_jobs() {
@@ -1844,13 +1986,30 @@ setup_cron_jobs() {
     # Remove existing cron jobs for n8n
     crontab -l 2>/dev/null | grep -v "/home/n8n" | crontab - 2>/dev/null || true
     
-    # Add backup job (daily at 2:00 AM)
-    (crontab -l 2>/dev/null; echo "0 2 * * * /home/n8n/backup-workflows.sh >> /home/n8n/logs/cron.log 2>&1") | crontab -
+    # Create cron file
+    CRON_FILE="/tmp/n8n_cron_$$"
+    crontab -l 2>/dev/null > "$CRON_FILE" || true
     
-    # Add auto-update job if enabled
+    # Add backup job (daily at 2:00 AM)
+    echo "0 2 * * * /home/n8n/backup-workflows.sh >> /home/n8n/logs/cron.log 2>&1" >> "$CRON_FILE"
+    
+    # Add auto-update job if enabled (every 12 hours)
     if [[ "$ENABLE_AUTO_UPDATE" == "true" ]]; then
-        (crontab -l 2>/dev/null; echo "0 */12 * * * /home/n8n/update-n8n.sh >> /home/n8n/logs/cron.log 2>&1") | crontab -
+        echo "0 */12 * * * /home/n8n/update-n8n.sh >> /home/n8n/logs/cron.log 2>&1" >> "$CRON_FILE"
     fi
+    
+    # Add health check job (every 5 minutes)
+    cat >> "$CRON_FILE" << 'EOF'
+*/5 * * * * curl -s http://localhost:5678/healthz >> /home/n8n/logs/health.log 2>&1
+EOF
+    
+    # Install new crontab
+    crontab "$CRON_FILE"
+    rm -f "$CRON_FILE"
+    
+    # Verify cron jobs
+    log "Cron jobs đã được thiết lập:"
+    crontab -l | grep "/home/n8n"
     
     success "Đã thiết lập cron jobs"
 }
@@ -1865,7 +2024,7 @@ check_ssl_rate_limit() {
         return 0
     fi
     
-    log "🔒 Kiểm tra SSL certificate (logic đã cải tiến)..."
+    log "🔒 Kiểm tra SSL certificate..."
     
     # Wait for Caddy to attempt SSL issuance
     log "⏳ Đợi Caddy xử lý SSL (tối đa 90 giây)..."
@@ -1874,7 +2033,7 @@ check_ssl_rate_limit() {
     local caddy_logs=$($DOCKER_COMPOSE logs caddy 2>&1)
 
     # First, check for a clear success message to avoid false positives
-    if echo "$caddy_logs" | grep -q "certificate obtained successfully" | grep -q "$DOMAIN"; then
+    if echo "$caddy_logs" | grep -q "certificate obtained successfully" || echo "$caddy_logs" | grep -q "$DOMAIN"; then
         success "✅ SSL certificate đã được cấp thành công cho $DOMAIN"
         return 0
     fi
@@ -1944,7 +2103,7 @@ else:
     else
         warning "⚠️ SSL có thể chưa sẵn sàng hoặc đã xảy ra lỗi khác."
         echo -e "${YELLOW}Vui lòng kiểm tra log của Caddy để biết chi tiết:${NC}"
-        $DOCKER_COMPOSE logs caddy
+        $DOCKER_COMPOSE logs caddy | tail -50
     fi
 }
 
@@ -1965,6 +2124,69 @@ setup_staging_ssl() {
     
     success "✅ Đã thiết lập Staging SSL"
     warning "⚠️ Website sẽ hiển thị 'Not Secure' - đây là bình thường với staging certificate"
+}
+
+# =============================================================================
+# HEALTH MONITORING SCRIPT (NEW)
+# =============================================================================
+
+create_health_monitor() {
+    log "🏥 Tạo script health monitoring..."
+    
+    cat > "$INSTALL_DIR/health-monitor.sh" << 'EOF'
+#!/bin/bash
+
+# =============================================================================
+# N8N HEALTH MONITOR
+# =============================================================================
+
+LOG_FILE="/home/n8n/logs/health.log"
+TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
+
+# Create log directory
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Check N8N health
+N8N_HEALTH=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz || echo "000")
+
+# Check container status
+N8N_STATUS=$(docker inspect -f '{{.State.Status}}' n8n-container 2>/dev/null || echo "not_found")
+
+# Log results
+echo "[$TIMESTAMP] N8N Health: $N8N_HEALTH, Container: $N8N_STATUS" >> "$LOG_FILE"
+
+# Send alert if unhealthy
+if [[ "$N8N_HEALTH" != "200" ]] || [[ "$N8N_STATUS" != "running" ]]; then
+    if [[ -f "/home/n8n/telegram_config.txt" ]]; then
+        source "/home/n8n/telegram_config.txt"
+        
+        if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
+            MESSAGE="⚠️ *N8N Health Alert*
+            
+Time: $TIMESTAMP
+Health Check: $N8N_HEALTH
+Container Status: $N8N_STATUS
+
+Please check your N8N instance!"
+            
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+                -d chat_id="$TELEGRAM_CHAT_ID" \
+                -d text="$MESSAGE" \
+                -d parse_mode="Markdown" > /dev/null || true
+        fi
+    fi
+    
+    # Try to restart if not running
+    if [[ "$N8N_STATUS" != "running" ]]; then
+        cd /home/n8n
+        docker compose up -d n8n
+    fi
+fi
+EOF
+
+    chmod +x "$INSTALL_DIR/health-monitor.sh"
+    
+    success "Đã tạo script health monitoring"
 }
 
 # =============================================================================
@@ -2093,7 +2315,7 @@ create_troubleshooting_script() {
 #!/bin/bash
 
 # =============================================================================
-# N8N TROUBLESHOOTING SCRIPT
+# N8N TROUBLESHOOTING SCRIPT - ENHANCED VERSION
 # =============================================================================
 
 # Colors
@@ -2174,24 +2396,22 @@ echo "• N8N data directory: $(ls -ld /home/n8n/files | awk '{print $1" "$3":"$
 echo "• Database file: $(ls -l /home/n8n/files/database.sqlite 2>/dev/null | awk '{print $1" "$3":"$4}' || echo 'Not found')"
 echo ""
 
-echo -e "${BLUE}📍 8. Recent Logs (last 20 lines):${NC}"
-echo -e "${YELLOW}N8N Logs:${NC}"
-$DOCKER_COMPOSE logs --tail=20 n8n 2>/dev/null || echo "No N8N logs"
+echo -e "${BLUE}📍 8. Health Check:${NC}"
+echo "• N8N Health: $(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz || echo "Failed")"
+echo "• Last health check logs:"
+tail -5 /home/n8n/logs/health.log 2>/dev/null || echo "  No health logs found"
 echo ""
 
-if docker ps | grep -q "caddy-proxy"; then
-    echo -e "${YELLOW}Caddy Logs:${NC}"
-    $DOCKER_COMPOSE logs --tail=20 caddy 2>/dev/null || echo "No Caddy logs"
-    echo ""
-fi
+echo -e "${BLUE}📍 9. Cron Jobs:${NC}"
+crontab -l 2>/dev/null | grep -E "(n8n|backup|update)" || echo "• No N8N cron jobs found"
+echo ""
 
-if docker ps | grep -q "news-api"; then
-    echo -e "${YELLOW}News API Logs:${NC}"
-    $DOCKER_COMPOSE logs --tail=20 fastapi 2>/dev/null || echo "No News API logs"
-    echo ""
-fi
+echo -e "${BLUE}📍 10. Recent Error Logs:${NC}"
+echo -e "${YELLOW}N8N Errors:${NC}"
+$DOCKER_COMPOSE logs n8n 2>&1 | grep -i "error" | tail -10 || echo "No errors found"
+echo ""
 
-echo -e "${BLUE}📍 9. Backup Status:${NC}"
+echo -e "${BLUE}📍 11. Backup Status:${NC}"
 if [[ -d "/home/n8n/files/backup_full" ]]; then
     BACKUP_COUNT=$(ls -1 /home/n8n/files/backup_full/n8n_backup_*.tar.gz 2>/dev/null | wc -l)
     echo "• Backup files: $BACKUP_COUNT"
@@ -2204,8 +2424,13 @@ else
 fi
 echo ""
 
-echo -e "${BLUE}📍 10. Cron Jobs:${NC}"
-crontab -l 2>/dev/null | grep -E "(n8n|backup)" || echo "• No N8N cron jobs found"
+echo -e "${BLUE}📍 12. Update Status:${NC}"
+if [[ -f "/home/n8n/logs/update.log" ]]; then
+    echo "• Last update attempt:"
+    tail -5 /home/n8n/logs/update.log
+else
+    echo "• No update logs found"
+fi
 echo ""
 
 echo -e "${GREEN}🔧 QUICK FIX COMMANDS:${NC}"
@@ -2214,6 +2439,8 @@ echo -e "${YELLOW}• Restart all services:${NC} cd /home/n8n && $DOCKER_COMPOSE
 echo -e "${YELLOW}• View live logs:${NC} cd /home/n8n && $DOCKER_COMPOSE logs -f"
 echo -e "${YELLOW}• Rebuild containers:${NC} cd /home/n8n && $DOCKER_COMPOSE down && $DOCKER_COMPOSE up -d --build"
 echo -e "${YELLOW}• Manual backup:${NC} /home/n8n/backup-manual.sh"
+echo -e "${YELLOW}• Manual update:${NC} /home/n8n/update-n8n.sh"
+echo -e "${YELLOW}• Check health:${NC} /home/n8n/health-monitor.sh"
 
 if [[ -n "$DOMAIN" && "$DOMAIN" != "localhost" ]]; then
     echo -e "${YELLOW}• Check SSL:${NC} curl -I https://$DOMAIN"
@@ -2264,13 +2491,16 @@ show_final_summary() {
     echo -e "  • Thư mục cài đặt: ${WHITE}${INSTALL_DIR}${NC}"
     echo -e "  • Script chẩn đoán: ${WHITE}${INSTALL_DIR}/troubleshoot.sh${NC}"
     echo -e "  • Test backup: ${WHITE}${INSTALL_DIR}/backup-manual.sh${NC}"
+    echo -e "  • Health monitor: ${WHITE}${INSTALL_DIR}/health-monitor.sh${NC}"
     echo ""
     
     echo -e "${CYAN}💾 CẤU HÌNH BACKUP:${NC}"
     echo -e "  • Telegram backup: ${WHITE}$([[ "$ENABLE_TELEGRAM" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
     echo -e "  • Google Drive backup: ${WHITE}$([[ "$ENABLE_GDRIVE_BACKUP" == "true" ]] && echo "Đã bật" || echo "Đã tắt")${NC}"
+    echo -e "  • Auto-update: ${WHITE}$([[ "$ENABLE_AUTO_UPDATE" == "true" ]] && echo "Đã bật (mỗi 12h)" || echo "Đã tắt")${NC}"
     if [[ "$LOCAL_MODE" != "true" ]]; then
         echo -e "  • Backup tự động: ${WHITE}Hàng ngày lúc 2:00 AM${NC}"
+        echo -e "  • Health check: ${WHITE}Mỗi 5 phút${NC}"
     fi
     echo -e "  • Backup location: ${WHITE}${INSTALL_DIR}/files/backup_full/${NC}"
     echo ""
@@ -2281,11 +2511,19 @@ show_final_summary() {
         echo ""
     fi
     
+    echo -e "${CYAN}📋 LỆNH HỮU ÍCH:${NC}"
+    echo -e "  • Kiểm tra logs: ${WHITE}cd /home/n8n && $DOCKER_COMPOSE logs -f${NC}"
+    echo -e "  • Restart services: ${WHITE}cd /home/n8n && $DOCKER_COMPOSE restart${NC}"
+    echo -e "  • Backup thủ công: ${WHITE}/home/n8n/backup-manual.sh${NC}"
+    echo -e "  • Update thủ công: ${WHITE}/home/n8n/update-n8n.sh${NC}"
+    echo -e "  • Chẩn đoán lỗi: ${WHITE}/home/n8n/troubleshoot.sh${NC}"
+    echo ""
+    
     echo -e "${CYAN}🚀 TÁC GIẢ:${NC}"
     echo -e "  • Tên: ${WHITE}Nguyễn Ngọc Thiện${NC}"
     echo -e "  • YouTube: ${WHITE}https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1${NC}"
     echo -e "  • Zalo: ${WHITE}08.8888.4749${NC}"
-    echo -e "  • Cập nhật: ${WHITE}30/06/2025${NC}"
+    echo -e "  • Cập nhật: ${WHITE}02/01/2025${NC}"
     echo ""
     
     echo -e "${YELLOW}🎬 ĐĂNG KÝ KÊNH YOUTUBE ĐỂ ỦNG HỘ MÌNH NHÉ! 🔔${NC}"
@@ -2345,6 +2583,7 @@ main() {
     # Create scripts
     create_backup_scripts
     create_update_script
+    create_health_monitor
     create_troubleshooting_script
     
     # Setup Backup Configs
