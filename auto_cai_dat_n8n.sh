@@ -1386,8 +1386,13 @@ services:
       - N8N_EXECUTIONS_DATA_MAX_SIZE=500MB
       - N8N_BINARY_DATA_TTL=1440
       - N8N_BINARY_DATA_MODE=filesystem
+      - N8N_BINARY_DATA_STORAGE=/files
+      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
+      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
     volumes:
       - ./files:/home/node/.n8n
+      - ./files:/files
       - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -2604,3 +2609,4 @@ main() {
 
 # Run main function
 main "$@"
+
