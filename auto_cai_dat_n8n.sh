@@ -185,12 +185,12 @@ detect_environment() {
 }
 
 check_docker_compose() {
-    if command -v docker-compose &> /dev/null; then
-        export DOCKER_COMPOSE="docker-compose"
-        info "Sử dụng docker-compose"
-    elif docker compose version &> /dev/null 2>&1; then
+    if docker compose version &> /dev/null 2>&1; then
         export DOCKER_COMPOSE="docker compose"
-        info "Sử dụng docker compose"
+        info "Sử dụng docker compose (v2)"
+    elif command -v docker-compose &> /dev/null; then
+        export DOCKER_COMPOSE="docker-compose"
+        warning "Phát hiện docker-compose v1 - sẽ thử cài docker compose plugin (v2) và ưu tiên dùng nó"
     else
         export DOCKER_COMPOSE=""
     fi
@@ -742,19 +742,32 @@ install_docker() {
     if command -v docker &> /dev/null; then
         info "Docker đã được cài đặt"
         
-        # Check if Docker is running
+        # Ensure Docker daemon is running
         if ! docker info &> /dev/null; then
             log "Khởi động Docker daemon..."
             systemctl start docker
             systemctl enable docker
         fi
         
-        # Install docker-compose if not available
-        if [[ -z "$DOCKER_COMPOSE" ]]; then
-            log "Cài đặt docker-compose..."
+        # Prefer Docker Compose v2 plugin; install if missing or if only v1 present
+        if docker compose version &> /dev/null 2>&1; then
+            export DOCKER_COMPOSE="docker compose"
+        else
+            log "Cài đặt docker compose plugin (v2)..."
             apt-get update
             apt-get install -y docker-compose-plugin
-            export DOCKER_COMPOSE="docker compose"
+            if docker compose version &> /dev/null 2>&1; then
+                export DOCKER_COMPOSE="docker compose"
+                info "Đã chuyển sang docker compose (v2)"
+            else
+                # Fallback: if only v1 exists, keep it but warn
+                if command -v docker-compose &> /dev/null; then
+                    export DOCKER_COMPOSE="docker-compose"
+                    warning "Chỉ tìm thấy docker-compose v1. Khuyến nghị cài docker compose (v2) để tránh lỗi."
+                else
+                    export DOCKER_COMPOSE=""
+                fi
+            fi
         fi
         
         return 0
@@ -762,27 +775,21 @@ install_docker() {
     
     log "📦 Cài đặt Docker..."
     
-    # Update system
     apt-get update
     apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
     
-    # Add Docker GPG key
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
     chmod a+r /etc/apt/keyrings/docker.asc
     
-    # Add Docker repository
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
     
-    # Install Docker
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     
-    # Start and enable Docker
     systemctl start docker
     systemctl enable docker
     
-    # Add current user to docker group
     usermod -aG docker $SUDO_USER 2>/dev/null || true
     
     export DOCKER_COMPOSE="docker compose"
@@ -962,11 +969,9 @@ USER_AGENTS = [
 ]
 
 def get_random_user_agent() -> str:
-    """Get a random user agent string"""
     return random.choice(USER_AGENTS)
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
-    """Verify Bearer token"""
     if credentials.credentials != NEWS_API_TOKEN:
         raise HTTPException(
             status_code=401,
@@ -1018,7 +1023,6 @@ class FeedResponse(BaseModel):
 
 # Helper functions
 def create_newspaper_config(language: str = "en") -> newspaper.Config:
-    """Create newspaper configuration with random user agent"""
     config = newspaper.Config()
     config.language = language
     config.browser_user_agent = get_random_user_agent()
@@ -1032,37 +1036,26 @@ def create_newspaper_config(language: str = "en") -> newspaper.Config:
     return config
 
 def extract_article_content(url: str, language: str = "en", extract_images: bool = True, summarize: bool = False) -> ArticleResponse:
-    """Extract content from a single article"""
     try:
         config = create_newspaper_config(language)
         article = Article(url, config=config)
-        
-        # Download and parse
         article.download()
         article.parse()
-        
-        # Extract keywords and summary if requested
         keywords = []
         summary = None
-        
         if article.text:
             try:
                 article.nlp()
-                keywords = article.keywords[:10]  # Limit to 10 keywords
+                keywords = article.keywords[:10]
                 if summarize:
                     summary = article.summary
             except Exception as e:
                 logger.warning(f"NLP processing failed for {url}: {e}")
-        
-        # Calculate read time (average 200 words per minute)
         word_count = len(article.text.split()) if article.text else 0
         read_time = max(1, round(word_count / 200))
-        
-        # Extract images
         images = []
         if extract_images:
-            images = list(article.images)[:10]  # Limit to 10 images
-        
+            images = list(article.images)[:10]
         return ArticleResponse(
             title=article.title or "No title",
             content=article.text or "No content",
@@ -1077,7 +1070,6 @@ def extract_article_content(url: str, language: str = "en", extract_images: bool
             read_time_minutes=read_time,
             url=url
         )
-        
     except Exception as e:
         logger.error(f"Error extracting article {url}: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to extract article: {str(e)}")
@@ -1085,7 +1077,6 @@ def extract_article_content(url: str, language: str = "en", extract_images: bool
 # API Routes
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """API Homepage with documentation"""
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -1095,7 +1086,7 @@ async def root():
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            .container {{ max-width: 880px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
             h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
             h2 {{ color: #34495e; margin-top: 30px; }}
             .endpoint {{ background: #ecf0f1; padding: 15px; border-radius: 5px; margin: 10px 0; }}
@@ -1105,31 +1096,36 @@ async def root():
             code {{ background: #2c3e50; color: #ecf0f1; padding: 2px 5px; border-radius: 3px; }}
             pre {{ background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; overflow-x: auto; }}
             .feature {{ background: #27ae60; color: white; padding: 10px; border-radius: 5px; margin: 5px 0; }}
+            .cta {{ background: #8e44ad; color: white; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+            a {{ color: #2c3e50; }}
         </style>
     </head>
     <body>
         <div class="container">
+            <div class="cta">
+                <strong>🎉 Xin chào từ Nguyễn Ngọc Thiện!</strong><br>
+                📺 Mời bạn <a href=\"https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1\" target=\"_blank\"><strong>đăng ký kênh YouTube</strong></a> để ủng hộ mình nhé!<br>
+                🎵 Playlist n8n: <a href=\"https://www.youtube.com/@kalvinthiensocial/playlists\" target=\"_blank\">Xem tại đây</a> · 
+                👍 Facebook: <a href=\"https://www.facebook.com/Ban.Thien.Handsome/\" target=\"_blank\">@Ban.Thien.Handsome</a> · 
+                📱 Zalo/SDT: <strong>08.8888.4749</strong>
+            </div>
             <h1>🚀 News Content API v2.0</h1>
             <p>Advanced News Content Extraction API với <strong>Newspaper4k</strong> và <strong>Random User Agents</strong></p>
-            
             <div class="auth-info">
                 <h3>🔐 Authentication Required</h3>
                 <p>Tất cả API calls yêu cầu Bearer Token trong header:</p>
                 <code>Authorization: Bearer YOUR_TOKEN_HERE</code>
                 <p><strong>Lưu ý:</strong> Token đã được đặt trong quá trình cài đặt và không hiển thị ở đây vì lý do bảo mật.</p>
             </div>
-
             <div class="token-change">
                 <h3>🔧 Đổi Bearer Token</h3>
                 <p><strong>Cách 1:</strong> One-liner command</p>
                 <pre>cd /home/n8n && sed -i 's/NEWS_API_TOKEN=.*/NEWS_API_TOKEN="NEW_TOKEN"/' docker-compose.yml && docker compose restart fastapi</pre>
-                
                 <p><strong>Cách 2:</strong> Edit file trực tiếp</p>
                 <pre>nano /home/n8n/docker-compose.yml
 # Tìm dòng NEWS_API_TOKEN và thay đổi
 docker compose restart fastapi</pre>
             </div>
-            
             <h2>✨ Tính Năng</h2>
             <div class="feature">📰 Cào nội dung bài viết từ bất kỳ website nào</div>
             <div class="feature">📡 Parse RSS feeds để lấy tin tức mới nhất</div>
@@ -1137,49 +1133,41 @@ docker compose restart fastapi</pre>
             <div class="feature">🌍 Hỗ trợ 80+ ngôn ngữ (Việt, Anh, Trung, Nhật...)</div>
             <div class="feature">🎭 Random User Agents để tránh bị block</div>
             <div class="feature">🤖 Tích hợp trực tiếp vào N8N workflows</div>
-            
             <h2>📖 API Endpoints</h2>
-            
             <div class="endpoint">
                 <span class="method">GET</span> <strong>/health</strong>
                 <p>Kiểm tra trạng thái API</p>
             </div>
-            
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/extract-article</strong>
                 <p>Lấy nội dung bài viết từ URL</p>
                 <pre>{{"url": "https://example.com/article", "language": "vi", "extract_images": true, "summarize": true}}</pre>
             </div>
-            
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/extract-source</strong>
                 <p>Cào nhiều bài viết từ website</p>
                 <pre>{{"url": "https://dantri.com.vn", "max_articles": 10, "language": "vi"}}</pre>
             </div>
-            
             <div class="endpoint">
                 <span class="method">POST</span> <strong>/parse-feed</strong>
                 <p>Phân tích RSS feeds</p>
                 <pre>{{"url": "https://dantri.com.vn/rss.xml", "max_articles": 10}}</pre>
             </div>
-            
             <h2>🔗 Documentation</h2>
             <p>
                 <a href="/docs" target="_blank">📚 Swagger UI</a> | 
                 <a href="/redoc" target="_blank">📖 ReDoc</a>
             </p>
-            
             <h2>💻 Ví Dụ cURL</h2>
-            <pre>curl -X POST "https://api.yourdomain.com/extract-article" \\
-     -H "Content-Type: application/json" \\
-     -H "Authorization: Bearer YOUR_TOKEN" \\
-     -d '{{"url": "https://dantri.com.vn/the-gioi.htm", "language": "vi"}}'</pre>
-            
+            <pre>curl -X POST "https://api.yourdomain.com/extract-article" \
+ -H "Content-Type: application/json" \
+ -H "Authorization: Bearer YOUR_TOKEN" \
+ -d '{{"url": "https://dantri.com.vn/the-gioi.htm", "language": "vi"}}'</pre>
             <hr style="margin: 30px 0;">
             <p style="text-align: center; color: #7f8c8d;">
                 🚀 Powered by <strong>Newspaper4k</strong> | 
                 👨‍💻 Created by <strong>Nguyễn Ngọc Thiện</strong> | 
-                📺 <a href="https://www.youtube.com/@kalvinthiensocial">YouTube Channel</a>
+                📺 <a href="https://www.youtube.com/@kalvinthiensocial?sub_confirmation=1">YouTube Channel</a>
             </p>
         </div>
     </body>
@@ -1189,14 +1177,13 @@ docker compose restart fastapi</pre>
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
     return {
         "status": "healthy",
         "timestamp": datetime.now(),
         "version": "2.0.0",
         "features": [
             "Article extraction",
-            "Source crawling", 
+            "Source crawling",
             "RSS feed parsing",
             "Multi-language support",
             "Random User Agents",
@@ -1211,7 +1198,6 @@ async def extract_article(
     request: ArticleRequest,
     token: str = Depends(verify_token)
 ):
-    """Extract content from a single article URL"""
     logger.info(f"Extracting article: {request.url}")
     return extract_article_content(
         str(request.url),
@@ -1225,17 +1211,12 @@ async def extract_source(
     request: SourceRequest,
     token: str = Depends(verify_token)
 ):
-    """Extract multiple articles from a news source"""
     try:
         logger.info(f"Extracting source: {request.url}")
-        
         config = create_newspaper_config(request.language)
         source = Source(str(request.url), config=config)
         source.build()
-        
-        # Limit articles
         articles_to_process = source.articles[:request.max_articles]
-        
         extracted_articles = []
         for article in articles_to_process:
             try:
@@ -1249,14 +1230,12 @@ async def extract_source(
             except Exception as e:
                 logger.warning(f"Failed to extract article {article.url}: {e}")
                 continue
-        
         return SourceResponse(
             source_url=str(request.url),
             articles=extracted_articles,
             total_articles=len(extracted_articles),
-            categories=source.category_urls()[:10]  # Limit categories
+            categories=source.category_urls()[:10]
         )
-        
     except Exception as e:
         logger.error(f"Error extracting source {request.url}: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to extract source: {str(e)}")
@@ -1266,23 +1245,14 @@ async def parse_feed(
     request: FeedRequest,
     token: str = Depends(verify_token)
 ):
-    """Parse RSS/Atom feed and extract articles"""
     try:
         logger.info(f"Parsing feed: {request.url}")
-        
-        # Set random user agent for requests
         headers = {'User-Agent': get_random_user_agent()}
-        
-        # Parse feed
         feed = feedparser.parse(str(request.url), request_headers=headers)
-        
         if feed.bozo:
             logger.warning(f"Feed parsing warning for {request.url}: {feed.bozo_exception}")
-        
-        # Extract articles
         articles = []
         entries_to_process = feed.entries[:request.max_articles]
-        
         for entry in entries_to_process:
             article_data = {
                 "title": getattr(entry, 'title', 'No title'),
@@ -1294,14 +1264,12 @@ async def parse_feed(
                 "summary": getattr(entry, 'summary', '')
             }
             articles.append(article_data)
-        
         return FeedResponse(
             feed_url=str(request.url),
             feed_title=getattr(feed.feed, 'title', 'Unknown Feed'),
             articles=articles,
             total_articles=len(articles)
         )
-        
     except Exception as e:
         logger.error(f"Error parsing feed {request.url}: {e}")
         raise HTTPException(status_code=400, detail=f"Failed to parse feed: {str(e)}")
@@ -1340,10 +1308,8 @@ COPY . .
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Expose port
 EXPOSE 8000
 
-# Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 EOF
     
@@ -1360,36 +1326,38 @@ version: '3.8'
 
 services:
   n8n:
-    build: .
+    build:
+      context: .
+      pull: true
     container_name: n8n-container
     restart: unless-stopped
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=http://localhost:5678/
-      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      - N8N_METRICS=true
-      - N8N_LOG_LEVEL=info
-      - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/home/node
-      - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
-      - DB_TYPE=sqlite
-      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
-      - N8N_BASIC_AUTH_ACTIVE=false
-      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
-      - EXECUTIONS_TIMEOUT=3600
-      - EXECUTIONS_TIMEOUT_MAX=7200
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=500MB
-      - N8N_BINARY_DATA_TTL=1440
-      - N8N_BINARY_DATA_MODE=filesystem
-      - N8N_BINARY_DATA_STORAGE=/files
-      - N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY=/files
-      - N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY=/files/temp
-      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,path,fs,util,os
+      N8N_HOST: "0.0.0.0"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      NODE_ENV: "production"
+      WEBHOOK_URL: "http://localhost:5678/"
+      GENERIC_TIMEZONE: "Asia/Ho_Chi_Minh"
+      N8N_METRICS: "true"
+      N8N_LOG_LEVEL: "info"
+      N8N_LOG_OUTPUT: "console"
+      N8N_USER_FOLDER: "/home/node"
+      N8N_ENCRYPTION_KEY: \${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
+      DB_TYPE: "sqlite"
+      DB_SQLITE_DATABASE: "/home/node/.n8n/database.sqlite"
+      N8N_BASIC_AUTH_ACTIVE: "false"
+      N8N_DISABLE_PRODUCTION_MAIN_PROCESS: "false"
+      EXECUTIONS_TIMEOUT: "3600"
+      EXECUTIONS_TIMEOUT_MAX: "7200"
+      N8N_EXECUTIONS_DATA_MAX_SIZE: "500MB"
+      N8N_BINARY_DATA_TTL: "1440"
+      N8N_BINARY_DATA_MODE: "filesystem"
+      N8N_BINARY_DATA_STORAGE: "/files"
+      N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY: "/files"
+      N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY: "/files/temp"
+      NODE_FUNCTION_ALLOW_BUILTIN: "child_process,path,fs,util,os"
     volumes:
       - ./files:/home/node/.n8n
       - ./files:/files
@@ -1409,8 +1377,8 @@ EOF
     ports:
       - "8000:8000"
     environment:
-      - NEWS_API_TOKEN=${BEARER_TOKEN}
-      - PYTHONUNBUFFERED=1
+      NEWS_API_TOKEN: ${BEARER_TOKEN}
+      PYTHONUNBUFFERED: "1"
     networks:
       - n8n_network
 EOF
@@ -1423,32 +1391,38 @@ version: '3.8'
 
 services:
   n8n:
-    build: .
+    build:
+      context: .
+      pull: true
     container_name: n8n-container
     restart: unless-stopped
     ports:
       - "127.0.0.1:5678:5678"
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${DOMAIN}/
-      - GENERIC_TIMEZONE=Asia/Ho_Chi_Minh
-      - N8N_METRICS=true
-      - N8N_LOG_LEVEL=info
-      - N8N_LOG_OUTPUT=console
-      - N8N_USER_FOLDER=/home/node
-      - N8N_ENCRYPTION_KEY=\${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
-      - DB_TYPE=sqlite
-      - DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite
-      - N8N_BASIC_AUTH_ACTIVE=false
-      - N8N_DISABLE_PRODUCTION_MAIN_PROCESS=false
-      - EXECUTIONS_TIMEOUT=3600
-      - EXECUTIONS_TIMEOUT_MAX=7200
-      - N8N_EXECUTIONS_DATA_MAX_SIZE=500MB
-      - N8N_BINARY_DATA_TTL=1440
-      - N8N_BINARY_DATA_MODE=filesystem
+      N8N_HOST: "0.0.0.0"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      NODE_ENV: "production"
+      WEBHOOK_URL: "https://${DOMAIN}/"
+      GENERIC_TIMEZONE: "Asia/Ho_Chi_Minh"
+      N8N_METRICS: "true"
+      N8N_LOG_LEVEL: "info"
+      N8N_LOG_OUTPUT: "console"
+      N8N_USER_FOLDER: "/home/node"
+      N8N_ENCRYPTION_KEY: \${N8N_ENCRYPTION_KEY:-$(openssl rand -hex 32)}
+      DB_TYPE: "sqlite"
+      DB_SQLITE_DATABASE: "/home/node/.n8n/database.sqlite"
+      N8N_BASIC_AUTH_ACTIVE: "false"
+      N8N_DISABLE_PRODUCTION_MAIN_PROCESS: "false"
+      EXECUTIONS_TIMEOUT: "3600"
+      EXECUTIONS_TIMEOUT_MAX: "7200"
+      N8N_EXECUTIONS_DATA_MAX_SIZE: "500MB"
+      N8N_BINARY_DATA_TTL: "1440"
+      N8N_BINARY_DATA_MODE: "filesystem"
+      N8N_BINARY_DATA_STORAGE: "/files"
+      N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY: "/files"
+      N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY: "/files/temp"
+      NODE_FUNCTION_ALLOW_BUILTIN: "child_process,path,fs,util,os"
     volumes:
       - ./files:/home/node/.n8n
       - ./files/youtube_content_anylystic:/data/youtube_content_anylystic
@@ -1485,8 +1459,8 @@ EOF
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - NEWS_API_TOKEN=${BEARER_TOKEN}
-      - PYTHONUNBUFFERED=1
+      NEWS_API_TOKEN: ${BEARER_TOKEN}
+      PYTHONUNBUFFERED: "1"
     networks:
       - n8n_network
 EOF
@@ -1787,10 +1761,7 @@ EOF
 }
 
 create_update_script() {
-    if [[ "$ENABLE_AUTO_UPDATE" != "true" ]]; then
-        return 0
-    fi
-    
+    # Luôn tạo script auto-update; cron sẽ phụ thuộc ENABLE_AUTO_UPDATE
     log "🔄 Tạo script auto-update..."
     
     cat > "$INSTALL_DIR/update-n8n.sh" << 'EOF'
@@ -1811,7 +1782,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Create log directory
 mkdir -p "$(dirname "$LOG_FILE")"
 
 log() {
@@ -1825,7 +1795,6 @@ error() {
 send_telegram() {
     if [[ -f "/home/n8n/telegram_config.txt" ]]; then
         source "/home/n8n/telegram_config.txt"
-        
         if [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHAT_ID" ]]; then
             curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
                 -d chat_id="$TELEGRAM_CHAT_ID" \
@@ -1835,92 +1804,149 @@ send_telegram() {
     fi
 }
 
-# Check Docker Compose command
-if command -v docker-compose &> /dev/null; then
-    DOCKER_COMPOSE="docker-compose"
-elif docker compose version &> /dev/null; then
-    DOCKER_COMPOSE="docker compose"
-else
+# Detect compose command (prefer v2)
+detect_compose_cmd() {
+    if docker compose version &> /dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
+    elif command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE="docker-compose"
+    else
+        DOCKER_COMPOSE=""
+    fi
+}
+
+detect_compose_cmd
+
+if [[ -z "$DOCKER_COMPOSE" ]]; then
     error "Docker Compose không tìm thấy!"
-    send_telegram "❌ *N8N Update Failed*
-Docker Compose không tìm thấy
-Time: $TIMESTAMP"
+    send_telegram "❌ *N8N Update Failed*\nDocker Compose không tìm thấy\nTime: $TIMESTAMP"
     exit 1
+fi
+
+# If both exist, force v2
+if command -v docker-compose &> /dev/null && docker compose version &> /dev/null 2>&1; then
+    DOCKER_COMPOSE="docker compose"
 fi
 
 cd /home/n8n
 
+# Sanitize docker-compose.yml if it has duplicate environment entries
+sanitize_compose() {
+    if [[ -f "docker-compose.yml" ]] && grep -qE '^[[:space:]]+-[[:space:]][A-Z0-9_]+=.*$' docker-compose.yml; then
+        awk '
+            BEGIN { in_env=0; env_indent=0 }
+            {
+                print_line=1
+                if ($0 ~ /^[[:space:]]+environment:[[:space:]]*$/) {
+                    in_env=1
+                    env_indent = match($0, /[^ ]/) - 1
+                    delete seen
+                    print $0
+                    next
+                }
+                if (in_env==1) {
+                    prefix=""
+                    for (i=0;i<env_indent+2;i++) prefix=prefix" "
+                    if (index($0, prefix"- ") == 1) {
+                        line=$0
+                        sub(/^[ \t-]+/, "", line)
+                        split(line, kv, "=")
+                        key=kv[1]
+                        if (key in seen) {
+                            print_line=0
+                        } else {
+                            seen[key]=1
+                        }
+                    } else if ($0 ~ /^[[:space:]]*$/) {
+                        # blank line inside env block
+                    } else if (match($0, /^[[:space:]]/) && length($0) > env_indent) {
+                        # deeper indented content; keep printing
+                    } else {
+                        in_env=0
+                    }
+                }
+                if (print_line) print $0
+            }
+        ' docker-compose.yml > docker-compose.yml.tmp && mv docker-compose.yml.tmp docker-compose.yml
+    fi
+}
+
+# Validate compose; if invalid try to sanitize duplicates
+if ! $DOCKER_COMPOSE config -q; then
+    log "🧹 Phát hiện vấn đề với docker-compose.yml, tiến hành làm sạch môi trường biến trùng lặp..."
+    sanitize_compose || true
+fi
+
+# Re-validate after sanitize
+if ! $DOCKER_COMPOSE config -q; then
+    error "docker-compose.yml vẫn không hợp lệ sau khi làm sạch"
+    send_telegram "❌ *N8N Update Failed*\ndocker-compose.yml không hợp lệ (env trùng lặp)\nTime: $TIMESTAMP"
+    exit 1
+fi
+
 log "🔄 Bắt đầu auto-update N8N..."
 
-# Backup before update
 log "💾 Backup trước khi update..."
 ./backup-workflows.sh || {
     error "Backup thất bại"
-    send_telegram "❌ *N8N Update Failed*
-Backup thất bại
-Time: $TIMESTAMP"
+    send_telegram "❌ *N8N Update Failed*\nBackup thất bại\nTime: $TIMESTAMP"
     exit 1
 }
 
-# Get current version before update
 OLD_VERSION=$(docker exec n8n-container n8n --version 2>/dev/null || echo "unknown")
 
-# Pull latest images
 log "📦 Pull latest Docker images..."
-$DOCKER_COMPOSE pull || {
+if ! $DOCKER_COMPOSE pull; then
     error "Pull images thất bại"
-    send_telegram "❌ *N8N Update Failed*
-Pull images thất bại
-Time: $TIMESTAMP"
+    send_telegram "❌ *N8N Update Failed*\nPull images thất bại\nTime: $TIMESTAMP"
     exit 1
-}
+fi
 
-# Update yt-dlp in running container
 log "📺 Update yt-dlp..."
 docker exec n8n-container pip3 install --break-system-packages -U yt-dlp || log "Update yt-dlp thất bại (non-critical)"
 
-# Restart services
 log "🔄 Restart services..."
-$DOCKER_COMPOSE up -d || {
-    error "Restart services thất bại"
-    send_telegram "❌ *N8N Update Failed*
-Restart services thất bại
-Time: $TIMESTAMP"
-    exit 1
-}
+if ! $DOCKER_COMPOSE up -d --remove-orphans; then
+    if [[ "$DOCKER_COMPOSE" == "docker-compose" ]]; then
+        log "⚠️ Gặp lỗi khi dùng docker-compose v1. Thử xoá container và chạy lại..."
+        $DOCKER_COMPOSE rm -fsv n8n || true
+        $DOCKER_COMPOSE rm -fsv caddy || true
+        $DOCKER_COMPOSE up -d --remove-orphans || {
+            error "Restart services thất bại"
+            send_telegram "❌ *N8N Update Failed*\nRestart services thất bại\nTime: $TIMESTAMP"
+            exit 1
+        }
+    else
+        error "Restart services thất bại"
+        send_telegram "❌ *N8N Update Failed*\nRestart services thất bại\nTime: $TIMESTAMP"
+        exit 1
+    fi
+fi
 
-# Wait for services to be ready
 log "⏳ Đợi services khởi động..."
 sleep 30
 
-# Check if services are running
 SERVICES_STATUS=""
 if docker ps | grep -q "n8n-container"; then
     log "✅ N8N container đang chạy"
-    SERVICES_STATUS="$SERVICES_STATUS
-✅ N8N: Running"
+    SERVICES_STATUS="$SERVICES_STATUS\n✅ N8N: Running"
 else
     error "❌ N8N container không chạy"
-    SERVICES_STATUS="$SERVICES_STATUS
-❌ N8N: Not running"
+    SERVICES_STATUS="$SERVICES_STATUS\n❌ N8N: Not running"
 fi
 
 if docker ps | grep -q "caddy-proxy"; then
     log "✅ Caddy container đang chạy"
-    SERVICES_STATUS="$SERVICES_STATUS
-✅ Caddy: Running"
+    SERVICES_STATUS="$SERVICES_STATUS\n✅ Caddy: Running"
 fi
 
 if docker ps | grep -q "news-api-container"; then
     log "✅ News API container đang chạy"
-    SERVICES_STATUS="$SERVICES_STATUS
-✅ News API: Running"
+    SERVICES_STATUS="$SERVICES_STATUS\n✅ News API: Running"
 fi
 
-# Get new version after update
 NEW_VERSION=$(docker exec n8n-container n8n --version 2>/dev/null || echo "unknown")
 
-# Health check
 HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:5678/healthz || echo "000")
 if [[ "$HEALTH_STATUS" == "200" ]]; then
     HEALTH_MSG="✅ Health check passed"
@@ -1928,25 +1954,14 @@ else
     HEALTH_MSG="❌ Health check failed (HTTP $HEALTH_STATUS)"
 fi
 
-# Send success notification
-MESSAGE="🔄 *N8N Auto-Update Report*
-        
-📅 Time: $TIMESTAMP
-🚀 Status: ✅ Success
-📦 Version: $OLD_VERSION → $NEW_VERSION
-🏥 Health: $HEALTH_MSG
-
-📊 Services:$SERVICES_STATUS
-
-🌐 All systems operational!"
+MESSAGE="🔄 *N8N Auto-Update Report*\n        \n📅 Time: $TIMESTAMP\n🚀 Status: ✅ Success\n📦 Version: $OLD_VERSION → $NEW_VERSION\n🏥 Health: $HEALTH_MSG\n\n📊 Services:$SERVICES_STATUS\n\n🌐 All systems operational!"
 
 send_telegram "$MESSAGE"
-
 log "🎉 Auto-update completed successfully!"
 log "Old version: $OLD_VERSION"
 log "New version: $NEW_VERSION"
 EOF
-
+    
     chmod +x "$INSTALL_DIR/update-n8n.sh"
     
     success "Đã tạo script auto-update"
