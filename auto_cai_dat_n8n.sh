@@ -833,37 +833,33 @@ FROM n8nio/n8n:latest
 
 USER root
 
-# Install system dependencies
+# TỐI ƯU HÓA: Sử dụng bộ package đã được kiểm chứng cho Puppeteer trên Alpine
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
-    python3-dev \
     py3-pip \
     chromium \
-    chromium-chromedriver \
-    curl \
-    wget \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
+    udev \
+    xvfb \
     git \
-    build-base \
-    linux-headers
+    build-base
 
-# Install yt-dlp
-RUN pip3 install --break-system-packages yt-dlp
+# TỐI ƯU HÓA: Thêm --no-cache-dir để giảm kích thước image
+RUN pip3 install --break-system-packages --no-cache-dir yt-dlp
 
-# Install Puppeteer dependencies
+# TỐI ƯU HÓA: Cài đặt Puppeteer và để nó tự tải về phiên bản trình duyệt tương thích
 RUN npm install -g puppeteer
 
-# Set Chrome path for Puppeteer
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# TỐI ƯU HÓA: Tự động tìm đường dẫn đến trình duyệt mà Puppeteer đã tải về
+ENV PUPPETEER_EXECUTABLE_PATH=$(npm root -g)/puppeteer/.local-chromium/linux-*/chrome-linux/chrome
 
-# Create directories with proper permissions
-RUN mkdir -p /home/node/.n8n/nodes
-RUN mkdir -p /data/youtube_content_anylystic
-
-# Set ownership to node user (UID 1000)
-RUN chown -R 1000:1000 /home/node/.n8n
-RUN chown -R 1000:1000 /data
+# TỐI ƯU HÓA: Gộp các lệnh tạo thư mục và phân quyền để giảm số layer của image
+RUN mkdir -p /home/node/.n8n/nodes /data/youtube_content_anylystic && \
+    chown -R 1000:1000 /home/node/.n8n /data
 
 USER node
 
@@ -875,6 +871,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:5678/healthz || exit 1
 
 WORKDIR /data
+
 EOF
     
     success "Đã tạo Dockerfile cho N8N"
@@ -2624,4 +2621,5 @@ main() {
 
 # Run main function
 main "$@"
+
 
