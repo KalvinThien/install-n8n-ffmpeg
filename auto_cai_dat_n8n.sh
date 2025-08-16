@@ -825,7 +825,7 @@ create_project_structure() {
     success "Đã tạo cấu trúc thư mục"
 }
 create_dockerfile() {
-    log "🐳 Tạo Dockerfile cho N8N (Đã sửa lỗi tương thích)..."
+    log "🐳 Tạo Dockerfile cho N8N (Phiên bản ổn định)..."
     
     cat > "$INSTALL_DIR/Dockerfile" << 'EOF'
 FROM n8nio/n8n:latest
@@ -833,45 +833,42 @@ FROM n8nio/n8n:latest
 USER root
 
 # =============================================================================
-# PHIÊN BẢN ĐÃ SỬA LỖI
-# - Loại bỏ 'linux-headers' để tránh xung đột kernel.
-# - Thêm 'jpeg-dev', 'zlib-dev', 'libffi-dev' là các thư viện phổ biến
-#   cần thiết để biên dịch các package Python/Node.js.
-# - Giữ lại môi trường build theo yêu cầu.
+# PHIÊN BẢN ỔN ĐỊNH
+# - Thêm 'apk update' để làm mới danh sách package, tránh lỗi tải file.
+# - Dọn dẹp cache 'apk' sau khi cài đặt để giảm kích thước image.
+# - Giữ nguyên các package bạn yêu cầu.
 # =============================================================================
-RUN apk add --no-cache \
-    # Các package cơ bản bạn cần
+RUN apk update && apk add --no-cache \
     ffmpeg \
     python3 \
+    python3-dev \
     py3-pip \
     curl \
     wget \
     git \
-    # Môi trường build (thay thế linux-headers bằng các dev-lib an toàn hơn)
     build-base \
-    python3-dev \
-    jpeg-dev \
-    zlib-dev \
-    libffi-dev
+    linux-headers \
+    && rm -rf /var/cache/apk/*
 
-# Cài đặt yt-dlp với --no-cache-dir để tối ưu kích thước image
+# Cài đặt yt-dlp
 RUN pip3 install --break-system-packages --no-cache-dir yt-dlp
 
-# Tối ưu hóa: Gộp các lệnh tạo thư mục và phân quyền vào một layer
+# Tối ưu hóa: Gộp các lệnh tạo thư mục và phân quyền
 RUN mkdir -p /home/node/.n8n/nodes /data/youtube_content_anylystic && \
     chown -R 1000:1000 /home/node/.n8n /data
 
 USER node
 
-# Health check để Docker có thể tự giám sát và khởi động lại container
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:5678/healthz || exit 1
 
 WORKDIR /data
 EOF
     
-    success "Đã tạo Dockerfile cho N8N (phiên bản đã sửa lỗi )"
+    success "Đã tạo Dockerfile cho N8N (phiên bản ổn định )"
 }
+
 
 
 create_news_api() {
@@ -2618,6 +2615,7 @@ main() {
 
 # Run main function
 main "$@"
+
 
 
 
