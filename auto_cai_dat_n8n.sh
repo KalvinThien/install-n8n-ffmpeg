@@ -824,50 +824,55 @@ create_project_structure() {
     
     success "Đã tạo cấu trúc thư mục"
 }
-
 create_dockerfile() {
-    log "🐳 Tạo Dockerfile cho N8N..."
+    log "🐳 Tạo Dockerfile cho N8N (Đã sửa lỗi tương thích)..."
     
     cat > "$INSTALL_DIR/Dockerfile" << 'EOF'
 FROM n8nio/n8n:latest
 
 USER root
 
-# Install system dependencies
+# =============================================================================
+# PHIÊN BẢN ĐÃ SỬA LỖI
+# - Loại bỏ 'linux-headers' để tránh xung đột kernel.
+# - Thêm 'jpeg-dev', 'zlib-dev', 'libffi-dev' là các thư viện phổ biến
+#   cần thiết để biên dịch các package Python/Node.js.
+# - Giữ lại môi trường build theo yêu cầu.
+# =============================================================================
 RUN apk add --no-cache \
+    # Các package cơ bản bạn cần
     ffmpeg \
     python3 \
-    python3-dev \
     py3-pip \
     curl \
     wget \
     git \
+    # Môi trường build (thay thế linux-headers bằng các dev-lib an toàn hơn)
     build-base \
-    linux-headers
+    python3-dev \
+    jpeg-dev \
+    zlib-dev \
+    libffi-dev
 
-# Install yt-dlp
-RUN pip3 install --break-system-packages yt-dlp
+# Cài đặt yt-dlp với --no-cache-dir để tối ưu kích thước image
+RUN pip3 install --break-system-packages --no-cache-dir yt-dlp
 
-# Create directories with proper permissions
-RUN mkdir -p /home/node/.n8n/nodes
-RUN mkdir -p /data/youtube_content_anylystic
-
-# Set ownership to node user (UID 1000)
-RUN chown -R 1000:1000 /home/node/.n8n
-RUN chown -R 1000:1000 /data
+# Tối ưu hóa: Gộp các lệnh tạo thư mục và phân quyền vào một layer
+RUN mkdir -p /home/node/.n8n/nodes /data/youtube_content_anylystic && \
+    chown -R 1000:1000 /home/node/.n8n /data
 
 USER node
 
-
-# Health check
+# Health check để Docker có thể tự giám sát và khởi động lại container
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:5678/healthz || exit 1
 
 WORKDIR /data
 EOF
     
-    success "Đã tạo Dockerfile cho N8N"
+    success "Đã tạo Dockerfile cho N8N (phiên bản đã sửa lỗi )"
 }
+
 
 create_news_api() {
     if [[ "$ENABLE_NEWS_API" != "true" ]]; then
@@ -2613,6 +2618,7 @@ main() {
 
 # Run main function
 main "$@"
+
 
 
 
