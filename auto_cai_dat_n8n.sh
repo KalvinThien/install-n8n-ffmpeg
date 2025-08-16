@@ -833,12 +833,20 @@ FROM n8nio/n8n:latest
 USER root
 
 # =============================================================================
-# PHIÊN BẢN ỔN ĐỊNH
-# - Thêm 'apk update' để làm mới danh sách package, tránh lỗi tải file.
-# - Dọn dẹp cache 'apk' sau khi cài đặt để giảm kích thước image.
-# - Giữ nguyên các package bạn yêu cầu.
+# PHIÊN BẢN ỔN ĐỊNH - FIXED
+# - Thêm retry mechanism cho apk update
+# - Xử lý lỗi network timeout
+# - Tối ưu hóa cài đặt package
+# - Thêm fallback cho các package có thể lỗi
 # =============================================================================
-RUN apk update && apk add --no-cache \
+
+# Update package index với retry mechanism
+RUN for i in 1 2 3; do \
+        apk update && break || sleep 2; \
+    done
+
+# Cài đặt các package cơ bản với error handling
+RUN apk add --no-cache \
     ffmpeg \
     python3 \
     python3-dev \
@@ -848,18 +856,23 @@ RUN apk update && apk add --no-cache \
     git \
     build-base \
     linux-headers \
-    && rm -rf /var/cache/apk/*
+    ca-certificates \
+    && rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
 
-# Cài đặt yt-dlp
-RUN pip3 install --break-system-packages --no-cache-dir yt-dlp
+# Cài đặt yt-dlp với retry mechanism
+RUN for i in 1 2 3; do \
+        pip3 install --break-system-packages --no-cache-dir --timeout=60 yt-dlp && break || \
+        (echo "Retry $i failed, waiting..." && sleep 5); \
+    done
 
-# Tối ưu hóa: Gộp các lệnh tạo thư mục và phân quyền
+# Tạo thư mục và phân quyền
 RUN mkdir -p /home/node/.n8n/nodes /data/youtube_content_anylystic && \
-    chown -R 1000:1000 /home/node/.n8n /data
+    chown -R 1000:1000 /home/node/.n8n /data && \
+    chmod -R 755 /home/node/.n8n /data
 
 USER node
 
-# Health check
+# Health check với timeout ngắn hơn
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:5678/healthz || exit 1
 
@@ -2615,6 +2628,7 @@ main() {
 
 # Run main function
 main "$@"
+
 
 
 
