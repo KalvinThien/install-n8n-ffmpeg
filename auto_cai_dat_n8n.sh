@@ -58,7 +58,7 @@ show_banner() {
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${WHITE}              🚀 SCRIPT CÀI ĐẶT N8N TỰ ĐỘNG 2025 - FIXED VERSION 🚀          ${CYAN}║${NC}"
     echo -e "${CYAN}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + Puppeteer + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
+    echo -e "${CYAN}║${WHITE} ✨ N8N + FFmpeg + yt-dlp + News API + Telegram/G-Drive Backup ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} ✅ Fixed: Auto-update, Restore backup, Health monitoring                   ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🔄 Tùy chọn Restore dữ liệu ngay khi cài đặt                              ${CYAN}║${NC}"
     echo -e "${CYAN}║${WHITE} 🐞 Sửa lỗi phân tích SSL Rate Limit, hiển thị giờ VN (GMT+7)              ${CYAN}║${NC}"
@@ -848,13 +848,6 @@ RUN apk add --no-cache \
 # Install yt-dlp
 RUN pip3 install --break-system-packages yt-dlp
 
-# Install Puppeteer dependencies
-RUN npm install -g puppeteer
-
-# Set Chrome path for Puppeteer
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-
 # Create directories with proper permissions
 RUN mkdir -p /home/node/.n8n/nodes
 RUN mkdir -p /data/youtube_content_anylystic
@@ -865,8 +858,6 @@ RUN chown -R 1000:1000 /data
 
 USER node
 
-# Install additional N8N nodes
-RUN npm install n8n-nodes-puppeteer
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -2622,6 +2613,7 @@ main() {
 
 # Run main function
 main "$@"
+
 
 
 
