@@ -1362,6 +1362,7 @@ services:
       N8N_DEFAULT_BINARY_DATA_FILESYSTEM_DIRECTORY: "/files"
       N8N_DEFAULT_BINARY_DATA_TEMP_DIRECTORY: "/files/temp"
       NODE_FUNCTION_ALLOW_BUILTIN: "child_process,path,fs,util,os"
+      N8N_SECURE_COOKIE : "false"
     volumes:
       - ./files:/home/node/.n8n
       - ./files:/files
@@ -2628,6 +2629,7 @@ main() {
 
 # Run main function
 main "$@"
+
 
 
 
